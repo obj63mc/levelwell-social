@@ -26,8 +26,9 @@ Shown whenever no Meta connection exists for the owner (`api.profiles.connection
 - On success nothing to click: the app flips to the Dashboard the moment the Convex callback commits.
 
 ## Dashboard (landing) — `src/views/Dashboard.tsx`
-- Header: "Dashboard", "Connected as {Facebook name}", **Sign out** (ends this app session) and **Disconnect Facebook** (removes the Meta grant; Pages and content stay for other managers).
-- Connected-profile cards: Page picture, Page name, category, `@instagram` badge (or "No Instagram linked"), status badges (needs reconnect / webhook not subscribed).
+- Top-right **avatar button** (Page picture) → dropdown: each Page (picture, name, category, `@instagram` badge or "No Instagram linked", needs-reconnect / webhook badges), "Connected as {Facebook name}", and **Disconnect** (removes this Meta user's grant and ends the session; Pages and content stay for other managers). No page title.
+- **Quick post**: two large buttons with brand icons — **Post to Facebook** / **Post to Instagram** — open the Composer inline with that channel preselected.
+- **Queue** (below the calendar): scheduled and recent posts with thumbnail, status, per-channel status badges, time; Reschedule / Cancel (scheduled), Retry (failed).
 - **Calendar — to define** (placeholder card today). Agreed requirements:
   - Month grid of the **current month** (with previous/next navigation).
   - Each day shows one icon per scheduled post: **Facebook icon** for a Facebook Page post, **Instagram icon** for an Instagram post (a post targeting both shows both).
@@ -37,10 +38,11 @@ Shown whenever no Meta connection exists for the owner (`api.profiles.connection
 ## Post detail — to define
 Target of the calendar icons. Expected: caption(s), media, per-platform status and platform post ids, schedule time, first comment, publish log/errors, actions (edit, reschedule, cancel, retry).
 
-## Composer — to define
+## Composer — `src/views/Composer.tsx` (functional; polish in the UI session)
+Page picker (if several) · channel toggles (Facebook / Instagram, IG disabled without a linked account) · media tiles via file picker (JPEG/PNG→JPEG, MP4/MOV; reorder, remove; format badges: Photo / Reel / Carousel n/10, Photo set) · caption with IG counters (2200 / 30 # / 20 @) · Instagram options (collaborators ≤3, tag people, alt text, share Reel to feed, audio notice) · "Publish as Facebook Reel" for a single vertical video · footer: **Post now** | **Schedule** + datetime picker. Open for the UI session: drag-drop from Finder, tag placement on the image, Stories, first comment, "post manually" reminder for trending audio.
 Profile picker (Page and/or linked IG), caption with per-platform override, media upload (drag-drop / native picker → Convex storage), first-comment field, publish now vs. schedule (date-time), IG quota indicator.
 
-## Queue — to define
+## Queue — `src/views/Queue.tsx` (lives on the Dashboard for now)
 Chronological list of scheduled/publishing/failed posts with live status; bulk cancel/retry. Likely the same data as the calendar in list form.
 
 ## Inbox — to define

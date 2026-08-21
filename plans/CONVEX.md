@@ -70,6 +70,8 @@ Official Convex components (`npx convex import` per each package's README, regis
 - `sessions` — app sessions minted after a Meta login (SHA-256 hash of the token only); every public function takes `sessionToken` and resolves it with `requireSession` (`convex/lib/session.ts`).
 - `profiles` — one per Facebook Page (+ linked IG user id/username, `webhookSubscribed`). **Shared by every Meta user who admins the Page**; holds no tokens.
 - `pageMembers` — (connection, profile) join: that manager's never-expiring Page token, Meta `tasks`, status (`active` | `needs_reconnect`). Rebuilt from `/me/accounts` on every login — Meta's Page roles are the source of truth; nothing is granted in-app.
+- `media` — uploaded assets in Convex file storage (`status: uploaded | attached | deleted`); `getUrl()` is what Meta downloads. Cleanup cron drops published media after 7 d and orphans after 24 h.
+- `posts` — Page-scoped post: caption, ordered `mediaIds`, `targets`, derived `igFormat`/`fbFormat`, `ig` options, `scheduledAt`, status, and per-channel `facebook`/`instagram` sub-objects whose ids (`postId`, `photoIds`, `creationId`, …) make the publisher idempotent under retries.
 - `oauthStates` — CSRF state for the login flow; the desktop subscribes to it to learn the outcome (no deep link needed).
 - `webhookEvents` — raw, signature-verified Meta deliveries; the inbox worker (later) turns them into comments.
 - Env vars are declared in `convex/convex.config.ts` and read through the typed `env` export (never `process.env`).

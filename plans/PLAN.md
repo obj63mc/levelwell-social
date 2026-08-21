@@ -7,6 +7,7 @@ Companion documents:
 - [`CONVEX.md`](./CONVEX.md) — Convex backend setup and platform facts
 - [`META.md`](./META.md) — Meta developer app creation, profile prerequisites, and configuration tasks
 - [`UI.md`](./UI.md) — page-by-page UI inventory (what each screen contains)
+- [`POSTS.md`](./POSTS.md) — Phase 3 implementation plan: compose, schedule, publish (with API research answers)
 - [`SETUP.md`](./SETUP.md) — macOS development environment
 
 ## Goals & Decisions
@@ -116,6 +117,10 @@ levelwell-social/
 │  ├─ convex.config.ts        # typed META_* env vars
 │  ├─ http.ts                 # HTTP actions: /oauth/callback, /webhooks/meta
 │  ├─ lib/session.ts          # requireSession / requirePageAccess / pageTokenFor
+│  ├─ lib/pool.ts             # @convex-dev/workpool publish queue
+│  ├─ media.ts / posts.ts     # uploads, post CRUD + scheduling (session + Page scoped)
+│  ├─ publish.ts              # idempotent FB/IG publisher (workpool action + state mutations)
+│  ├─ crons.ts                # media cleanup
 │  ├─ profiles.ts             # connectionStatus / list (token-free shapes)
 │  ├─ webhooks.ts             # signature check, raw event storage
 │  ├─ meta/                   # Graph API layer
@@ -142,6 +147,7 @@ levelwell-social/
 1. **Foundation** — ✅ Convex project + Tauri v2 scaffold with React, shadcn/ui and the convex client; no end-user auth in v1.
 2. **Connect** — ✅ First-launch Connect screen → Meta OAuth via `/oauth/callback`; token chain to never-expiring Page tokens stored server-side; Pages subscribed to webhooks; `/webhooks/meta` handshake + HMAC validation storing raw events; Dashboard shell listing connected Pages + linked IG accounts.
 2c. **Sessions & Page scoping** — ✅ Convex Auth removed; app sessions claimed after Meta login; Pages shared across managers via `pageMembers`.
+3. **Posts** — ✅ Composer (asset(s) + caption, Facebook and/or Instagram, IG collaborators/tags/alt text/share-to-feed, FB Reel toggle), "Post now" or schedule; `@convex-dev/workpool` runs the idempotent publisher (FB photo/photo set/video/Reel; IG image/Reel/carousel with container polling); Queue with cancel/reschedule/retry; media cleanup cron. Details + API research in [`POSTS.md`](./POSTS.md).
 2b. **Dashboard calendar** — month calendar of scheduled posts with Facebook/Instagram icons per day linking to the in-app post (see [`UI.md`](./UI.md)); designed in the UI session.
 3. **Composer + immediate publish** — media upload to Convex storage; per-platform caption overrides; publish-now pipelines for FB and IG; first-comment step; result notifications.
 4. **Scheduling** — `scheduler.runAt` per post with cancel/re-arm on edit; Calendar/Queue view with live status; workpool retries/backoff; optional FB native-scheduling toggle.

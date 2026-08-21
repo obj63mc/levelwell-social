@@ -108,6 +108,9 @@ The endpoint is live in `convex/http.ts` (GET handshake, POST HMAC validation �
 - Permissions: `pages_messaging` (+ `instagram_manage_comments` for IG, `instagram_manage_messages` for IG DMs, `pages_manage_metadata` for the `messages` webhook field). Page token must come from a user with the **MESSAGING** task. Dev mode: only app-role users can be messaged.
 - Webhook fields to add for replies landing in the inbox: Page `messages`, Instagram `messages`.
 
+### Composer capabilities (researched 2026-08-21)
+- Trending/licensed audio: **not available via API** — bake music into the video. Collaborators (≤3) and user tags: **Instagram only** (images, Reels, carousels). Cross-posting IG⇄FB: **no API toggle** — the app publishes to each selected channel separately. Facebook Reels: `video_reels` start → `rupload` (`file_url` header) → finish; 30 API Reels/24 h. Full notes in [`POSTS.md`](./POSTS.md).
+
 ## 8. Setup Completion Checklist
 
 - [x] IG account(s) Professional + linked to admin'd Page(s)
