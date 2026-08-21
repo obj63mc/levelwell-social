@@ -79,9 +79,9 @@ Success looks like: a native window opens rendering the Vite dev server, with ho
 
 ## Quick checklist
 
-- [ ] `xcode-select --install` completed (`xcode-select -p` prints a path)
-- [ ] Rust via rustup (`rustc --version` works)
-- [ ] Node v20.19+/v22.12+ (`node --version`)
-- [ ] Editor + rust-analyzer set up
-- [ ] Convex account ready (see [`CONVEX.md`](./CONVEX.md))
+- [x] `xcode-select --install` completed (`xcode-select -p` prints a path)
+- [x] Rust via rustup (`rustc --version` works)
+- [x] Node v20.19+/v22.12+ (`node --version`)
+- [x] Editor + rust-analyzer set up
+- [x] Convex account ready (see [`CONVEX.md`](./CONVEX.md))
 - [ ] Meta developer app ready (see [`META.md`](./META.md))
