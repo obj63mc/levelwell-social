@@ -12,6 +12,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import {
   DropdownMenu,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
@@ -52,7 +53,7 @@ export default function Dashboard({ status, sessionToken }: { status: Connection
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-72">
             {status.profiles.map((p) => (
-              <DropdownMenuLabel key={p._id} className="flex items-center gap-3 font-normal">
+              <div key={p._id} className="flex items-center gap-3 px-1.5 py-2 text-sm">
                 <Avatar className="size-9">
                   <AvatarImage src={p.pagePictureUrl} alt="" />
                   <AvatarFallback>{p.pageName.slice(0, 2).toUpperCase()}</AvatarFallback>
@@ -76,12 +77,12 @@ export default function Dashboard({ status, sessionToken }: { status: Connection
                     {!p.webhookSubscribed && <Badge variant="outline">Webhook not subscribed</Badge>}
                   </div>
                 </div>
-              </DropdownMenuLabel>
+              </div>
             ))}
             <DropdownMenuSeparator />
-            <DropdownMenuLabel className="text-muted-foreground text-xs font-normal">
-              Connected as {connection.metaUserName} on Facebook
-            </DropdownMenuLabel>
+            <DropdownMenuGroup>
+              <DropdownMenuLabel className="font-normal">Connected as {connection.metaUserName} on Facebook</DropdownMenuLabel>
+            </DropdownMenuGroup>
             <DropdownMenuItem variant="destructive" onClick={() => void end()}>
               <Unplug /> Disconnect
             </DropdownMenuItem>
