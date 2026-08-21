@@ -4,16 +4,16 @@ Convex ([convex.dev](https://www.convex.dev)) is the backend of record for Level
 
 ## 1. Account & Project Setup
 
-- [ ] Create a Convex account at [dashboard.convex.dev](https://dashboard.convex.dev) (GitHub sign-in is simplest). Free tier — no card needed.
-- [ ] In the repo, initialize the project:
+- [x] Create a Convex account at [dashboard.convex.dev](https://dashboard.convex.dev) (GitHub sign-in is simplest). Free tier — no card needed.
+- [x] In the repo, initialize the project:
   ```bash
   npm create convex@latest   # or, in an existing app: npm install convex && npx convex dev
   ```
   `npx convex dev` logs in, creates the project, provisions your personal **dev deployment**, writes `CONVEX_DEPLOYMENT` to `.env.local`, and starts live-syncing `convex/` functions.
-- [ ] Note the two deployments every project gets:
+- [x] Note the two deployments every project gets:
   - **Dev**: `https://<dev-name>.convex.cloud` (functions) / `https://<dev-name>.convex.site` (HTTP actions)
   - **Prod**: created on first `npx convex deploy` — separate URL, separate env vars, separate data.
-- [ ] Record both `.convex.site` URLs — they are needed in the Meta app config (OAuth redirect + webhook callback; see [`META.md`](./META.md)).
+- [x] Record both `.convex.site` URLs — they are needed in the Meta app config (OAuth redirect + webhook callback; see [`META.md`](./META.md)).
 
 ## 2. Environment Variables (secrets live here, never on the desktop)
 
@@ -24,7 +24,7 @@ npx convex env set META_APP_ID "<app id>"
 npx convex env set META_APP_SECRET "<app secret>"
 npx convex env set META_LOGIN_CONFIG_ID "<facebook login for business config id>"
 npx convex env set META_WEBHOOK_VERIFY_TOKEN "<random string you generate>"
-npx convex env set META_GRAPH_VERSION "v25.0"
+npx convex env set META_GRAPH_VERSION "v26.0"
 ```
 
 - Read via `process.env.*` inside functions. Limits: 512 vars, 8 KiB/value.
@@ -65,6 +65,13 @@ Official Convex components (`npx convex import` per each package's README, regis
 - **`ctx.storage.getUrl(storageId)` returns a PUBLIC, non-expiring, unauthenticated URL** — this is what gets passed to Instagram as `image_url`/`video_url` (Meta downloads the file). Revocation = deleting the file → the media-cleanup cron deletes files after successful publish.
 - Do not serve big media through HTTP actions (20 MB cap) — always `getUrl()`.
 
+### Data model (current)
+- `connections` — one per Facebook user grant: long-lived user token (~60 d), granted scopes, status.
+- `profiles` — one per Facebook Page: never-expiring Page token, linked IG user id/username, `webhookSubscribed`, status (`active` | `needs_reconnect`).
+- `oauthStates` — CSRF state for the login flow; the desktop subscribes to it to learn the outcome (no deep link needed).
+- `webhookEvents` — raw, signature-verified Meta deliveries; the inbox worker (later) turns them into comments.
+- Env vars are declared in `convex/convex.config.ts` and read through the typed `env` export (never `process.env`).
+
 ### Clients
 - Desktop UI uses the official **`convex` JS client** (`ConvexReactClient`, `useQuery`/`useMutation`) — reactive WebSocket subscriptions give the live queue/inbox UX. Works in Tauri v2's WKWebView; add the Convex URLs to the Tauri CSP allowlist.
 - An official Rust client (`convex` crate) exists if the Tauri shell ever needs direct backend access — not planned for v1.
@@ -91,13 +98,13 @@ Official Convex components (`npx convex import` per each package's README, regis
 
 - Development: `npx convex dev` (live function sync against the dev deployment) + `npm run dev` (Vite) + `npm run tauri dev`.
 - Production: `npx convex deploy` pushes functions to prod; the desktop app is pointed at the prod `.convex.cloud` URL at build time.
-- Tests: `vitest` with the official `convex-test` harness for queue/idempotency logic.
+- Tests: `npm test` — `vitest` + `convex-test` (`convex/*.test.ts`); currently covers the webhook handshake/HMAC, OAuth state lifecycle and token-free public queries.
 
 ## 7. Setup Completion Checklist
 
 - [x] Convex account + project created; dev deployment live via `npx convex dev`
-- [ ] Prod deployment created via first `npx convex deploy`
-- [ ] All env vars from §2 set on dev **and** prod
+- [x] Prod deployment created via first `npx convex deploy`
+- [x] All env vars from §2 set on dev **and** prod
 - [ ] Components from §3 installed and registered
-- [ ] Both `.convex.site` URLs registered in the Meta app ([`META.md`](./META.md) §4–5)
-- [ ] Smoke test: an HTTP action responding at `https://<dev>.convex.site/webhooks/meta` (GET handshake echo)
+- [x] Both `.convex.site` URLs registered in the Meta app for OAuth; webhook callback → dev URL ([`META.md`](./META.md) §4–5)
+- [x] Smoke test: `https://<dev>.convex.site/webhooks/meta` echoes the GET handshake, accepts signed POSTs, rejects forged ones

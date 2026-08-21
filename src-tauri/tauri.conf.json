@@ -24,7 +24,7 @@
       }
     ],
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://*.convex.cloud wss://*.convex.cloud https://*.convex.site; img-src 'self' asset: http://asset.localhost data: blob: https://*.convex.cloud; media-src 'self' asset: http://asset.localhost blob: https://*.convex.cloud; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
+      "csp": "default-src 'self'; connect-src 'self' ipc: http://ipc.localhost https://*.convex.cloud wss://*.convex.cloud https://*.convex.site; img-src 'self' asset: http://asset.localhost data: blob: https://*.convex.cloud https://*.fbcdn.net https://*.fbsbx.com; media-src 'self' asset: http://asset.localhost blob: https://*.convex.cloud; style-src 'self' 'unsafe-inline'; font-src 'self' data:"
     }
   },
   "bundle": {

@@ -6,12 +6,14 @@ Companion documents:
 
 - [`CONVEX.md`](./CONVEX.md) — Convex backend setup and platform facts
 - [`META.md`](./META.md) — Meta developer app creation, profile prerequisites, and configuration tasks
+- [`UI.md`](./UI.md) — page-by-page UI inventory (what each screen contains)
+- [`SETUP.md`](./SETUP.md) — macOS development environment
 
 ## Goals & Decisions
 
 | Decision | Choice |
 |---|---|
-| Platforms posted to | Facebook Pages + Instagram professional accounts (Meta Graph API v25.0) |
+| Platforms posted to | Facebook Pages + Instagram professional accounts (Meta Graph API, version pinned in the `META_GRAPH_VERSION` env var — v26.0 today) |
 | Desktop client | **Tauri v2** (macOS; ~3–10 MB bundle, system WKWebView — far lighter than Electron) |
 | Backend | **Convex** — database, post queue, scheduled tasks, file storage, and *all* Graph API traffic |
 | Audience | Personal use now (Meta app stays in Development mode — no App Review); architected for multi-user distribution later |
@@ -26,7 +28,7 @@ Why Convex (vs. a purely local app): it solves the three hardest problems at onc
 ```
 ┌──────────── Tauri v2 macOS app (thin client) ────────────┐
 │ WebView UI (React + convex client, WebSocket reactive)   │
-│  Profiles ▸ Composer ▸ Calendar/Queue ▸ Inbox ▸ Settings │
+│  Connect ▸ Dashboard (calendar) ▸ Composer ▸ Inbox ▸ … │
 │ Rust shell: tray, notifications, media file pick/drag,   │
 │  open system browser for OAuth                           │
 └───────────────┬──────────────────────────────────────────┘
@@ -38,7 +40,7 @@ Why Convex (vs. a purely local app): it solves the three hardest problems at onc
 │ HTTP actions (…convex.site):                                         │
 │   /oauth/callback  ← Meta Facebook Login redirect URI                │
 │   /webhooks/meta   ← comment webhooks (verify + signed payloads)     │
-│ Actions (server-side fetch → graph.facebook.com v25.0):              │
+│ Actions (server-side fetch → graph.facebook.com/{version}):            │
 │   token exchange & Page-token derivation (app secret in env vars)    │
 │   publish pipelines (FB feed/photos/videos, IG container→publish)    │
 │   first-comment step, comment polling, replies                       │
@@ -102,7 +104,7 @@ Full details and setup tasks in [`META.md`](./META.md). The load-bearing facts:
 
 ## App Auth (desktop → Convex)
 
-- v1 (personal): **no end-user auth** — sensitive functions are `internal*`; the deployment is personal. Optionally gate client-callable functions with a shared secret.
+- v1 (personal): **no end-user auth** — sensitive functions are `internal*`; the deployment is personal. All documents are owned by `DEFAULT_OWNER_EMAIL` (`convex/lib/owner.ts`, `teresa@levelwell.com`). Public queries never return access tokens.
 - Later (multi-user): Clerk (most mature Convex integration) or the official `@convex-dev/better-auth` component. Convex Auth remains beta (2026) — avoided. Every table carries `userId` ownership from day one so this is an auth swap, not a migration.
 
 ## Repository Layout (to be created)
@@ -110,11 +112,15 @@ Full details and setup tasks in [`META.md`](./META.md). The load-bearing facts:
 ```
 levelwell-social/
 ├─ convex/                    # Convex backend (TypeScript)
-│  ├─ schema.ts               # users, profiles, posts, queueEntries, comments, media
+│  ├─ schema.ts               # connections, profiles, oauthStates, webhookEvents (+ posts, comments, media later)
+│  ├─ convex.config.ts        # typed META_* env vars
 │  ├─ http.ts                 # HTTP actions: /oauth/callback, /webhooks/meta
+│  ├─ lib/owner.ts            # DEFAULT_OWNER_EMAIL (no end-user auth yet)
+│  ├─ profiles.ts             # connectionStatus / list (token-free shapes)
+│  ├─ webhooks.ts             # signature check, raw event storage
 │  ├─ meta/                   # Graph API layer
-│  │  ├─ client.ts            # typed fetch wrapper, v25.0 const, error mapping
-│  │  ├─ auth.ts              # code→token→long-lived→Page-token chain
+│  │  ├─ client.ts            # typed fetch wrapper, error mapping, paging
+│  │  ├─ oauth.ts             # start/status, code→token→long-lived→Page-token chain, webhook subscribe
 │  │  ├─ publishFacebook.ts   # feed/photos/videos (+ optional native scheduling)
 │  │  ├─ publishInstagram.ts  # container → status poll → media_publish
 │  │  └─ comments.ts          # first comment, replies, comment polling
@@ -124,22 +130,24 @@ levelwell-social/
 │  ├─ crons.ts                # comment polling sweep, media cleanup, token health
 │  └─ media.ts                # generateUploadUrl, storage-URL helpers
 ├─ src/                       # desktop frontend (React + TS + Vite + convex client)
-│  ├─ views/ (Profiles, Composer, Calendar, Inbox, Settings)
-│  └─ lib/ (convex client setup, shared types)
+│  ├─ views/ (ConnectMeta, Dashboard; Composer, Inbox, Settings… later)
+│  ├─ components/ (ui/ = shadcn, icons.tsx = brand glyphs)
+│  └─ lib/ (utils, openExternal)
 ├─ src-tauri/                 # thin Rust shell (tray, notifications, browser open, drag-drop)
 └─ plans/                     # this plan + setup runbooks
 ```
 
 ## Build Phases
 
-1. **Foundation** — Convex project + schema; Tauri v2 scaffold with React + convex client; tray + notifications shell; no end-user auth in v1.
-2. **Profiles/auth** — Meta OAuth via `/oauth/callback`; token chain to never-expiring Page tokens stored server-side; reactive Profiles view listing connected Pages + linked IG accounts.
+1. **Foundation** — ✅ Convex project + Tauri v2 scaffold with React, shadcn/ui and the convex client; no end-user auth in v1.
+2. **Connect** — ✅ First-launch Connect screen → Meta OAuth via `/oauth/callback`; token chain to never-expiring Page tokens stored server-side; Pages subscribed to webhooks; `/webhooks/meta` handshake + HMAC validation storing raw events; Dashboard shell listing connected Pages + linked IG accounts.
+2b. **Dashboard calendar** — month calendar of scheduled posts with Facebook/Instagram icons per day linking to the in-app post (see [`UI.md`](./UI.md)); designed in the UI session.
 3. **Composer + immediate publish** — media upload to Convex storage; per-platform caption overrides; publish-now pipelines for FB and IG; first-comment step; result notifications.
 4. **Scheduling** — `scheduler.runAt` per post with cancel/re-arm on edit; Calendar/Queue view with live status; workpool retries/backoff; optional FB native-scheduling toggle.
-5. **Inbox v1** — `/webhooks/meta` (handshake + HMAC + upsert); subscriptions wired during profile connect; polling cron; unified reactive inbox with reply, read/unread, tray badge, notifications.
+5. **Inbox v1** — process stored `webhookEvents` into comments; polling cron; unified reactive inbox with reply, read/unread, tray badge, notifications.
 6. **Polish** — IG quota display, media-cleanup cron, empirical probe of FB scheduling window, app icon + notarization.
 
-*(UI design and detailed application flows: to be planned in a follow-up session.)*
+*(Per-page UI: [`UI.md`](./UI.md). Calendar, Composer and Inbox design: follow-up UI session.)*
 
 ## Verification
 

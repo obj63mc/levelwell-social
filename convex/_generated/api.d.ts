@@ -10,7 +10,12 @@
 
 import type * as auth from "../auth.js";
 import type * as http from "../http.js";
+import type * as lib_owner from "../lib/owner.js";
+import type * as meta_client from "../meta/client.js";
+import type * as meta_oauth from "../meta/oauth.js";
+import type * as profiles from "../profiles.js";
 import type * as system from "../system.js";
+import type * as webhooks from "../webhooks.js";
 
 import type {
   ApiFromModules,
@@ -21,7 +26,12 @@ import type {
 declare const fullApi: ApiFromModules<{
   auth: typeof auth;
   http: typeof http;
+  "lib/owner": typeof lib_owner;
+  "meta/client": typeof meta_client;
+  "meta/oauth": typeof meta_oauth;
+  profiles: typeof profiles;
   system: typeof system;
+  webhooks: typeof webhooks;
 }>;
 
 /**
