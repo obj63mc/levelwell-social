@@ -32,11 +32,11 @@ That's the entire Tauri v2 macOS prerequisite list: CLT + Rust. There is **no we
 The frontend uses Vite + React and the Convex CLI. Check:
 
 ```bash
-node --version   # want v20.19+ or v22.12+ (LTS); older versions break current Vite
+node --version   # project pins Node 26 via .nvmrc / package.json engines
 npm --version
 ```
 
-If it's older, `brew upgrade node` or use a version manager (`brew install fnm`, then `fnm install --lts`).
+This repo uses **Node 26** (`.nvmrc`). With nvm: `nvm install 26 && nvm alias default 26`, then `nvm use` in the repo. Note: if both nvm and Homebrew Node are installed, nvm's version wins on PATH — keep nvm on 26.
 
 ## 4. Project-level CLIs (installed per-project via npm — nothing global)
 
@@ -70,10 +70,12 @@ After scaffolding lands (build phase 1), this sequence proves the environment en
 
 ```bash
 git clone https://github.com/obj63mc/levelwell-social && cd levelwell-social
+nvm use                # picks Node 26 from .nvmrc
 npm install            # frontend deps + Tauri & Convex CLIs
-npx convex dev         # first run: logs in, provisions your dev deployment
-npm run tauri dev      # compiles the Rust shell (first build takes a few minutes) and opens the app
+npm run dev:app        # convex dev (first run logs in / provisions a dev deployment) + tauri dev
 ```
+
+`npm run dev:app` runs `convex dev --start "npm run tauri dev"`; the first Tauri launch compiles the Rust shell (a few minutes). Equivalent two-terminal form: `npm run dev:convex` and `npm run tauri dev`.
 
 Success looks like: a native window opens rendering the Vite dev server, with hot reload on frontend edits and `convex dev` live-syncing backend functions. Expect the first `tauri dev` Rust compile to take several minutes; incremental rebuilds after that are fast.
 
@@ -81,7 +83,7 @@ Success looks like: a native window opens rendering the Vite dev server, with ho
 
 - [x] `xcode-select --install` completed (`xcode-select -p` prints a path)
 - [x] Rust via rustup (`rustc --version` works)
-- [x] Node v20.19+/v22.12+ (`node --version`)
+- [x] Node 26 (`node --version`)
 - [x] Editor + rust-analyzer set up
 - [x] Convex account ready (see [`CONVEX.md`](./CONVEX.md))
 - [ ] Meta developer app ready (see [`META.md`](./META.md))

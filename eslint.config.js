@@ -10,6 +10,7 @@ export default defineConfig([
   {
     ignores: [
       "dist",
+      "src-tauri",
       "eslint.config.js",
       "convex/_generated",
       "postcss.config.js",
@@ -75,6 +76,11 @@ export default defineConfig([
       // for consistency (esp. Convex `handler`s)
       "@typescript-eslint/require-await": "off",
     },
+  },
+  {
+    // shadcn/ui generated components export variant helpers alongside components.
+    files: ["src/components/ui/**/*.tsx"],
+    rules: { "react-refresh/only-export-components": "off" },
   },
   ...convexPlugin.configs.recommended,
 ]);

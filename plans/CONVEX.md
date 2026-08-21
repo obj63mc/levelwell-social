@@ -70,7 +70,8 @@ Official Convex components (`npx convex import` per each package's README, regis
 - An official Rust client (`convex` crate) exists if the Tauri shell ever needs direct backend access — not planned for v1.
 
 ### Auth (app users)
-- **Convex Auth is still beta (2026) — avoided.** v1 runs without end-user auth: all sensitive functions are `internal*`, the deployment is personal. Multi-user later: Clerk (most mature integration) or `@convex-dev/better-auth`. Schema carries `userId` from day one.
+- **Convex Auth (`@convex-dev/auth`, Password provider) is installed by the template and kept, but no sign-in is required to use the app for now.** `authTables` stay in the schema, `convex/auth.ts` + HTTP routes remain wired, and the frontend uses `ConvexAuthProvider` without any `Authenticated` gating. If data needs a default owner before sign-in exists, the convention is **`teresa@levelwell.com`**.
+- Enabling sign-in later: run `npx @convex-dev/auth` once to generate the JWT env vars on the deployment, then add the sign-in UI. Convex Auth is still labeled beta; Clerk or `@convex-dev/better-auth` remain the alternatives if it proves limiting.
 
 ## 5. Pricing & Limits Snapshot (2026)
 
@@ -94,7 +95,7 @@ Official Convex components (`npx convex import` per each package's README, regis
 
 ## 7. Setup Completion Checklist
 
-- [ ] Convex account + project created; dev deployment live via `npx convex dev`
+- [x] Convex account + project created; dev deployment live via `npx convex dev`
 - [ ] Prod deployment created via first `npx convex deploy`
 - [ ] All env vars from §2 set on dev **and** prod
 - [ ] Components from §3 installed and registered
