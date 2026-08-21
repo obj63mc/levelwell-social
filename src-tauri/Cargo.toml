@@ -22,3 +22,10 @@ tauri = { version = "2.11.5", features = ["tray-icon"] }
 tauri-plugin-opener = "2.5.4"
 tauri-plugin-dialog = "2.7.2"
 tauri-plugin-notification = "2.3.3"
+
+# Dev only: show our icon in the Dock when running the bare `tauri dev` binary
+# (release builds get it from the .app bundle's icon.icns).
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3.2", features = ["NSApplication", "NSImage", "NSRunningApplication"] }
+objc2-foundation = { version = "0.3.2", features = ["NSData"] }
+objc2 = "0.6.4"
