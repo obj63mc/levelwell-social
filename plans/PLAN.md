@@ -104,8 +104,8 @@ Full details and setup tasks in [`META.md`](./META.md). The load-bearing facts:
 
 ## App Auth (desktop → Convex)
 
-- v1 (personal): **no end-user auth** — sensitive functions are `internal*`; the deployment is personal. All documents are owned by `DEFAULT_OWNER_EMAIL` (`convex/lib/owner.ts`, `teresa@levelwell.com`). Public queries never return access tokens.
-- Later (multi-user): Clerk (most mature Convex integration) or the official `@convex-dev/better-auth` component. Convex Auth remains beta (2026) — avoided. Every table carries `userId` ownership from day one so this is an auth swap, not a migration.
+- **The Facebook login is the app login** — no separate sign-in. A successful Meta OAuth mints an app session (`sessions`, hashed) that the desktop sends as `sessionToken` with every call (`convex/lib/session.ts`). Sensitive functions are `internal*`; public queries never return access tokens.
+- **Identity vs. content scope**: identity = the Meta user (`connections`); content (posts, calendar, inbox, DMs) belongs to the **Facebook Page** (`profiles`) and is shared by every Meta user who admins that Page (`pageMembers`, rebuilt from `/me/accounts` at each login). Two managers therefore see and manage the same content; each acts with their own Page token. Details in [`CONVEX.md`](./CONVEX.md#auth-app-users).
 
 ## Repository Layout (to be created)
 
@@ -115,7 +115,7 @@ levelwell-social/
 │  ├─ schema.ts               # connections, profiles, oauthStates, webhookEvents (+ posts, comments, media later)
 │  ├─ convex.config.ts        # typed META_* env vars
 │  ├─ http.ts                 # HTTP actions: /oauth/callback, /webhooks/meta
-│  ├─ lib/owner.ts            # DEFAULT_OWNER_EMAIL (no end-user auth yet)
+│  ├─ lib/session.ts          # requireSession / requirePageAccess / pageTokenFor
 │  ├─ profiles.ts             # connectionStatus / list (token-free shapes)
 │  ├─ webhooks.ts             # signature check, raw event storage
 │  ├─ meta/                   # Graph API layer
@@ -141,6 +141,7 @@ levelwell-social/
 
 1. **Foundation** — ✅ Convex project + Tauri v2 scaffold with React, shadcn/ui and the convex client; no end-user auth in v1.
 2. **Connect** — ✅ First-launch Connect screen → Meta OAuth via `/oauth/callback`; token chain to never-expiring Page tokens stored server-side; Pages subscribed to webhooks; `/webhooks/meta` handshake + HMAC validation storing raw events; Dashboard shell listing connected Pages + linked IG accounts.
+2c. **Sessions & Page scoping** — ✅ Convex Auth removed; app sessions claimed after Meta login; Pages shared across managers via `pageMembers`.
 2b. **Dashboard calendar** — month calendar of scheduled posts with Facebook/Instagram icons per day linking to the in-app post (see [`UI.md`](./UI.md)); designed in the UI session.
 3. **Composer + immediate publish** — media upload to Convex storage; per-platform caption overrides; publish-now pipelines for FB and IG; first-comment step; result notifications.
 4. **Scheduling** — `scheduler.runAt` per post with cancel/re-arm on edit; Calendar/Queue view with live status; workpool retries/backoff; optional FB native-scheduling toggle.

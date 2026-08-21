@@ -1,9 +1,9 @@
 import { v } from "convex/values";
 import { internal } from "../_generated/api";
 import { internalAction, internalMutation, internalQuery, mutation, query } from "../_generated/server";
-import type { Doc, Id } from "../_generated/dataModel";
-import { DEFAULT_OWNER_EMAIL } from "../lib/owner";
+import type { Id } from "../_generated/dataModel";
 import { env } from "../_generated/server";
+import { hashToken, randomHex, requireSession, sessionArgs } from "../lib/session";
 import { describeError, graphGet, graphGetAll, graphPost, graphVersion } from "./client";
 
 const STATE_TTL_MS = 15 * 60 * 1000;
@@ -12,21 +12,14 @@ export function redirectUri(): string {
   return `${env.CONVEX_SITE_URL}/oauth/callback`;
 }
 
-function randomState(): string {
-  const bytes = new Uint8Array(32);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
-}
-
 /** Desktop calls this, then opens `url` in the system browser. */
 export const start = mutation({
   args: {},
   returns: v.object({ state: v.string(), url: v.string() }),
   handler: async (ctx) => {
-    const state = randomState();
+    const state = randomHex(32);
     await ctx.db.insert("oauthStates", {
       state,
-      ownerEmail: DEFAULT_OWNER_EMAIL,
       status: "pending",
       expiresAt: Date.now() + STATE_TTL_MS,
     });
@@ -65,6 +58,34 @@ export const status = query({
   },
 });
 
+/**
+ * Once `status` is completed, the desktop claims its app session exactly once.
+ * The token is never exposed through the reactive `status` query.
+ */
+export const claimSession = mutation({
+  args: { state: v.string() },
+  returns: v.object({ sessionToken: v.string() }),
+  handler: async (ctx, args) => {
+    const doc = await ctx.db
+      .query("oauthStates")
+      .withIndex("by_state", (q) => q.eq("state", args.state))
+      .unique();
+    if (!doc || doc.status !== "completed" || !doc.connectionId) throw new Error("Login has not completed.");
+    if (doc.claimedAt !== undefined) throw new Error("This login was already claimed. Start again from the app.");
+    if (doc.expiresAt < Date.now()) throw new Error("This login link expired. Start again from the app.");
+    const now = Date.now();
+    await ctx.db.patch("oauthStates", doc._id, { claimedAt: now });
+    const sessionToken = randomHex(32);
+    await ctx.db.insert("sessions", {
+      tokenHash: await hashToken(sessionToken),
+      connectionId: doc.connectionId,
+      createdAt: now,
+      lastSeenAt: now,
+    });
+    return { sessionToken };
+  },
+});
+
 export const getState = internalQuery({
   args: { state: v.string() },
   handler: async (ctx, args) => {
@@ -78,7 +99,7 @@ export const getState = internalQuery({
 /** Atomically claims a pending, unexpired state. Throws if it can't. */
 export const consumeState = internalMutation({
   args: { state: v.string() },
-  returns: v.object({ ownerEmail: v.string() }),
+  returns: v.null(),
   handler: async (ctx, args) => {
     const doc = await ctx.db
       .query("oauthStates")
@@ -91,7 +112,7 @@ export const consumeState = internalMutation({
       throw new Error("This login link expired. Start again from the app.");
     }
     await ctx.db.patch("oauthStates", doc._id, { status: "in_progress" });
-    return { ownerEmail: doc.ownerEmail };
+    return null;
   },
 });
 
@@ -120,6 +141,7 @@ const pageInput = v.object({
   pageCategory: v.optional(v.string()),
   pagePictureUrl: v.optional(v.string()),
   pageAccessToken: v.string(),
+  tasks: v.array(v.string()),
   igUserId: v.optional(v.string()),
   igUsername: v.optional(v.string()),
   igProfilePictureUrl: v.optional(v.string()),
@@ -127,10 +149,12 @@ const pageInput = v.object({
   lastError: v.optional(v.string()),
 });
 
-/** Upserts the connection (by Meta user id) and its Pages (by Page id). */
+/**
+ * Upserts the connection (by Meta user id), each Page (by Page id, shared by all
+ * its managers), and this user's membership + Page token on each Page.
+ */
 export const saveConnection = internalMutation({
   args: {
-    ownerEmail: v.string(),
     metaUserId: v.string(),
     metaUserName: v.string(),
     longLivedUserToken: v.string(),
@@ -153,25 +177,39 @@ export const saveConnection = internalMutation({
       connectionId = await ctx.db.insert("connections", { ...connectionFields, status: "connected" });
     }
 
-    const seen = new Set<string>();
+    const granted = new Set<Id<"profiles">>();
     for (const page of pages) {
-      seen.add(page.pageId);
+      const { pageAccessToken, tasks, lastError, ...pageFields } = page;
       const current = await ctx.db
         .query("profiles")
         .withIndex("by_pageId", (q) => q.eq("pageId", page.pageId))
         .unique();
-      const fields = { ...page, connectionId, ownerEmail: args.ownerEmail, status: "active" as const };
-      if (current) await ctx.db.patch("profiles", current._id, fields);
-      else await ctx.db.insert("profiles", fields);
+      let profileId: Id<"profiles">;
+      if (current) {
+        await ctx.db.patch("profiles", current._id, pageFields);
+        profileId = current._id;
+      } else {
+        profileId = await ctx.db.insert("profiles", pageFields);
+      }
+      granted.add(profileId);
+
+      const memberFields = { pageAccessToken, tasks, status: "active" as const, lastError };
+      const member = await ctx.db
+        .query("pageMembers")
+        .withIndex("by_connectionId_and_profileId", (q) => q.eq("connectionId", connectionId).eq("profileId", profileId))
+        .unique();
+      if (member) await ctx.db.patch("pageMembers", member._id, memberFields);
+      else await ctx.db.insert("pageMembers", { profileId, connectionId, ...memberFields });
     }
-    // Pages the user no longer granted access to.
-    const stale = await ctx.db
-      .query("profiles")
-      .withIndex("by_connectionId", (q) => q.eq("connectionId", connectionId))
+
+    // Pages this user no longer granted access to. The Page itself (and its content) stays.
+    const memberships = await ctx.db
+      .query("pageMembers")
+      .withIndex("by_connectionId_and_profileId", (q) => q.eq("connectionId", connectionId))
       .collect();
-    for (const profile of stale) {
-      if (!seen.has(profile.pageId)) {
-        await ctx.db.patch("profiles", profile._id, { status: "needs_reconnect", lastError: "Page access was not granted on the last login." });
+    for (const member of memberships) {
+      if (!granted.has(member.profileId)) {
+        await ctx.db.patch("pageMembers", member._id, { status: "needs_reconnect", lastError: "Page access was not granted on the last login." });
       }
     }
     return connectionId;
@@ -186,6 +224,7 @@ type Account = {
   name: string;
   category?: string;
   access_token: string;
+  tasks?: string[];
   picture?: { data?: { url?: string } };
   instagram_business_account?: { id: string; username?: string; profile_picture_url?: string };
 };
@@ -196,8 +235,7 @@ export const completeConnect = internalAction({
   returns: v.null(),
   handler: async (ctx, args) => {
     // Throws (and the callback page shows why) if the state is unknown, used, or expired.
-    const claimed: { ownerEmail: string } = await ctx.runMutation(internal.meta.oauth.consumeState, { state: args.state });
-    const ownerEmail = claimed.ownerEmail;
+    await ctx.runMutation(internal.meta.oauth.consumeState, { state: args.state });
 
     try {
       const appId = env.META_APP_ID;
@@ -231,7 +269,7 @@ export const completeConnect = internalAction({
         "me/accounts",
         {
           fields:
-            "id,name,category,access_token,picture{url},instagram_business_account{id,username,profile_picture_url}",
+            "id,name,category,access_token,tasks,picture{url},instagram_business_account{id,username,profile_picture_url}",
           limit: 100,
         },
         userToken,
@@ -257,6 +295,7 @@ export const completeConnect = internalAction({
           pageCategory: account.category,
           pagePictureUrl: account.picture?.data?.url,
           pageAccessToken: account.access_token,
+          tasks: account.tasks ?? [],
           igUserId: account.instagram_business_account?.id,
           igUsername: account.instagram_business_account?.username,
           igProfilePictureUrl: account.instagram_business_account?.profile_picture_url,
@@ -266,7 +305,6 @@ export const completeConnect = internalAction({
       }
 
       const connectionId: Id<"connections"> = await ctx.runMutation(internal.meta.oauth.saveConnection, {
-        ownerEmail,
         metaUserId: me.id,
         metaUserName: me.name,
         longLivedUserToken: userToken,
@@ -284,18 +322,37 @@ export const completeConnect = internalAction({
   },
 });
 
-/** Dev convenience + "sign out of Facebook" — removes the grant and its Pages locally. */
-export const disconnect = mutation({
-  args: { connectionId: v.id("connections") },
+/** Ends this app session only; the Meta grant stays so the next login reuses it. */
+export const signOut = mutation({
+  args: sessionArgs,
   returns: v.null(),
   handler: async (ctx, args) => {
-    const profiles = await ctx.db
-      .query("profiles")
-      .withIndex("by_connectionId", (q) => q.eq("connectionId", args.connectionId))
+    const { session } = await requireSession(ctx, args.sessionToken);
+    await ctx.db.patch("sessions", session._id, { revokedAt: Date.now() });
+    return null;
+  },
+});
+
+/**
+ * "Disconnect Facebook": removes this Meta user's grant, sessions, and Page
+ * memberships. Pages and their content remain for the other managers.
+ */
+export const disconnect = mutation({
+  args: sessionArgs,
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const { connection } = await requireSession(ctx, args.sessionToken);
+    const members = await ctx.db
+      .query("pageMembers")
+      .withIndex("by_connectionId_and_profileId", (q) => q.eq("connectionId", connection._id))
       .collect();
-    for (const profile of profiles) await ctx.db.delete("profiles", profile._id);
-    const connection: Doc<"connections"> | null = await ctx.db.get("connections", args.connectionId);
-    if (connection) await ctx.db.delete("connections", connection._id);
+    for (const member of members) await ctx.db.delete("pageMembers", member._id);
+    const sessions = await ctx.db
+      .query("sessions")
+      .withIndex("by_connectionId", (q) => q.eq("connectionId", connection._id))
+      .collect();
+    for (const session of sessions) await ctx.db.delete("sessions", session._id);
+    await ctx.db.delete("connections", connection._id);
     return null;
   },
 });

@@ -1,18 +1,28 @@
 import { useMutation } from "convex/react";
-import { CalendarDays, TriangleAlert, Unplug } from "lucide-react";
+import { CalendarDays, LogOut, TriangleAlert, Unplug } from "lucide-react";
 import { InstagramIcon } from "@/components/icons";
 import type { FunctionReturnType } from "convex/server";
 import { api } from "../../convex/_generated/api";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { clearSessionToken } from "@/lib/session";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 
 type ConnectionStatus = FunctionReturnType<typeof api.profiles.connectionStatus>;
 
-export default function Dashboard({ status }: { status: ConnectionStatus }) {
+export default function Dashboard({ status, sessionToken }: { status: ConnectionStatus; sessionToken: string }) {
   const disconnect = useMutation(api.meta.oauth.disconnect);
+  const signOut = useMutation(api.meta.oauth.signOut);
   const connection = status.connection!;
+
+  async function end(action: typeof signOut) {
+    try {
+      await action({ sessionToken });
+    } finally {
+      clearSessionToken();
+    }
+  }
 
   return (
     <main className="mx-auto flex min-h-svh max-w-6xl flex-col gap-6 p-8">
@@ -21,9 +31,14 @@ export default function Dashboard({ status }: { status: ConnectionStatus }) {
           <h1 className="text-3xl font-semibold tracking-tight">Dashboard</h1>
           <p className="text-muted-foreground mt-1 text-sm">Connected as {connection.metaUserName} on Facebook</p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => void disconnect({ connectionId: connection._id })}>
-          <Unplug /> Disconnect
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={() => void end(signOut)}>
+            <LogOut /> Sign out
+          </Button>
+          <Button variant="ghost" size="sm" onClick={() => void end(disconnect)}>
+            <Unplug /> Disconnect Facebook
+          </Button>
+        </div>
       </header>
 
       <section aria-label="Connected profiles" className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

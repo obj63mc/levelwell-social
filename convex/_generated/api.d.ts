@@ -8,9 +8,8 @@
  * @module
  */
 
-import type * as auth from "../auth.js";
 import type * as http from "../http.js";
-import type * as lib_owner from "../lib/owner.js";
+import type * as lib_session from "../lib/session.js";
 import type * as meta_client from "../meta/client.js";
 import type * as meta_oauth from "../meta/oauth.js";
 import type * as profiles from "../profiles.js";
@@ -24,9 +23,8 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
-  auth: typeof auth;
   http: typeof http;
-  "lib/owner": typeof lib_owner;
+  "lib/session": typeof lib_session;
   "meta/client": typeof meta_client;
   "meta/oauth": typeof meta_oauth;
   profiles: typeof profiles;

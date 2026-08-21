@@ -26,7 +26,7 @@ Shown whenever no Meta connection exists for the owner (`api.profiles.connection
 - On success nothing to click: the app flips to the Dashboard the moment the Convex callback commits.
 
 ## Dashboard (landing) — `src/views/Dashboard.tsx`
-- Header: "Dashboard", "Connected as {Facebook name}", **Disconnect**.
+- Header: "Dashboard", "Connected as {Facebook name}", **Sign out** (ends this app session) and **Disconnect Facebook** (removes the Meta grant; Pages and content stay for other managers).
 - Connected-profile cards: Page picture, Page name, category, `@instagram` badge (or "No Instagram linked"), status badges (needs reconnect / webhook not subscribed).
 - **Calendar — to define** (placeholder card today). Agreed requirements:
   - Month grid of the **current month** (with previous/next navigation).
@@ -44,7 +44,7 @@ Profile picker (Page and/or linked IG), caption with per-platform override, medi
 Chronological list of scheduled/publishing/failed posts with live status; bulk cancel/retry. Likely the same data as the calendar in list form.
 
 ## Inbox — to define
-Email-client layout: thread list (unread bold, platform icon, post thumbnail) + conversation pane with reply box; mark read/unread; new comments appear live from webhooks/polling.
+Email-client layout: thread list (unread bold, platform icon, post thumbnail) + conversation pane with reply box; mark read/unread; new comments appear live from webhooks/polling. Per comment: **Reply publicly** and **Send private reply** (DM; disabled after 7 days or once used — see META.md §7). The inbox is per Page, shared by all its managers.
 
 ## Profiles — to define
 Each connected Page/IG with token health, webhook subscription state, last reconnect; **Reconnect** runs the Connect flow again.

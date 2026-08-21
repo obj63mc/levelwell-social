@@ -1,7 +1,6 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
-import { ConvexAuthProvider } from "@convex-dev/auth/react";
-import { ConvexReactClient } from "convex/react";
+import { ConvexProvider, ConvexReactClient } from "convex/react";
 import "./index.css";
 import App from "./App.tsx";
 
@@ -16,8 +15,8 @@ colorScheme.addEventListener("change", applyColorScheme);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <ConvexAuthProvider client={convex}>
+    <ConvexProvider client={convex}>
       <App />
-    </ConvexAuthProvider>
+    </ConvexProvider>
   </StrictMode>,
 );

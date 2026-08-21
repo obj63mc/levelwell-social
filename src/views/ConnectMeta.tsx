@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { AlertCircle, CheckCircle2, ExternalLink } from "lucide-react";
 import { FacebookIcon, InstagramIcon } from "@/components/icons";
 import { api } from "../../convex/_generated/api";
 import { openExternal } from "@/lib/external";
+import { setSessionToken } from "@/lib/session";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
@@ -18,12 +19,27 @@ const STEPS = [
 
 export default function ConnectMeta() {
   const start = useMutation(api.meta.oauth.start);
+  const claimSession = useMutation(api.meta.oauth.claimSession);
   const [attempt, setAttempt] = useState<{ state: string; url: string } | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
   const status = useQuery(api.meta.oauth.status, attempt ? { state: attempt.state } : "skip");
 
-  const waiting = attempt !== null && (status === undefined || status?.status === "pending" || status?.status === "in_progress");
+  const completed = status?.status === "completed";
+  const waiting = attempt !== null && !localError && (status === undefined || status?.status === "pending" || status?.status === "in_progress" || completed);
   const failed = status?.status === "failed" ? (status.error ?? "Connection failed.") : localError;
+
+  // Meta confirmed in the browser: claim this app's session exactly once.
+  // Storing the token flips the App gate to the Dashboard.
+  useEffect(() => {
+    if (!completed || !attempt) return;
+    const state = attempt.state;
+    claimSession({ state })
+      .then(({ sessionToken }) => setSessionToken(sessionToken))
+      .catch((e: unknown) => {
+        setLocalError(e instanceof Error ? e.message : String(e));
+        setAttempt(null);
+      });
+  }, [completed, attempt, claimSession]);
 
   async function begin() {
     setLocalError(null);
@@ -88,7 +104,7 @@ export default function ConnectMeta() {
             <>
               <div className="text-muted-foreground flex items-center gap-2 text-sm">
                 <Spinner />
-                Waiting for Facebook… finish in your browser.
+                {completed ? "Finishing up…" : "Waiting for Facebook… finish in your browser."}
               </div>
               <div className="flex gap-2">
                 <Button variant="outline" size="sm" onClick={() => { if (attempt) void openExternal(attempt.url); }}>

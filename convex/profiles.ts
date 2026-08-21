@@ -1,9 +1,8 @@
 import { v } from "convex/values";
 import { query } from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
-import { DEFAULT_OWNER_EMAIL } from "./lib/owner";
+import { isUnauthenticated, profilesForSession, requireSession, sessionArgs, type PageAccess } from "./lib/session";
 
-// Public shape: never includes access tokens.
+// Public shape: never includes access tokens. Page fields + this manager's membership status.
 export const profileSummary = v.object({
   _id: v.id("profiles"),
   pageId: v.string(),
@@ -18,7 +17,7 @@ export const profileSummary = v.object({
   lastError: v.optional(v.string()),
 });
 
-export function toSummary(p: Doc<"profiles">) {
+export function toSummary({ profile: p, member }: PageAccess) {
   return {
     _id: p._id,
     pageId: p.pageId,
@@ -29,14 +28,14 @@ export function toSummary(p: Doc<"profiles">) {
     igUsername: p.igUsername,
     igProfilePictureUrl: p.igProfilePictureUrl,
     webhookSubscribed: p.webhookSubscribed,
-    status: p.status,
-    lastError: p.lastError,
+    status: member.status,
+    lastError: member.lastError,
   };
 }
 
-/** Drives the first-launch gate: no connection → Connect screen. */
+/** Drives the first-launch gate: no (valid) session → Connect screen. */
 export const connectionStatus = query({
-  args: {},
+  args: sessionArgs,
   returns: v.object({
     connected: v.boolean(),
     connection: v.optional(
@@ -50,16 +49,16 @@ export const connectionStatus = query({
     ),
     profiles: v.array(profileSummary),
   }),
-  handler: async (ctx) => {
-    const connection = await ctx.db
-      .query("connections")
-      .withIndex("by_ownerEmail", (q) => q.eq("ownerEmail", DEFAULT_OWNER_EMAIL))
-      .first();
-    if (!connection) return { connected: false, profiles: [] };
-    const profiles = await ctx.db
-      .query("profiles")
-      .withIndex("by_connectionId", (q) => q.eq("connectionId", connection._id))
-      .collect();
+  handler: async (ctx, args) => {
+    let session;
+    try {
+      session = await requireSession(ctx, args.sessionToken);
+    } catch (error) {
+      if (isUnauthenticated(error)) return { connected: false, profiles: [] };
+      throw error;
+    }
+    const { connection } = session;
+    const pages = await profilesForSession(ctx, session);
     return {
       connected: true,
       connection: {
@@ -69,19 +68,17 @@ export const connectionStatus = query({
         userTokenExpiresAt: connection.userTokenExpiresAt,
         grantedScopes: connection.grantedScopes,
       },
-      profiles: profiles.map(toSummary),
+      profiles: pages.map(toSummary),
     };
   },
 });
 
+/** Pages the caller may manage. */
 export const list = query({
-  args: {},
+  args: sessionArgs,
   returns: v.array(profileSummary),
-  handler: async (ctx) => {
-    const profiles = await ctx.db
-      .query("profiles")
-      .withIndex("by_ownerEmail", (q) => q.eq("ownerEmail", DEFAULT_OWNER_EMAIL))
-      .collect();
-    return profiles.map(toSummary);
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.sessionToken);
+    return (await profilesForSession(ctx, session)).map(toSummary);
   },
 });

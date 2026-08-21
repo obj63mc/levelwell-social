@@ -98,21 +98,24 @@ describe("OAuth state", () => {
     expect(await t.query(api.meta.oauth.status, { state })).toMatchObject({ status: "failed", error: "User denied" });
   });
 
-  test("connectionStatus is false before connecting and strips tokens after", async () => {
+  test("connectionStatus is false for an unknown session and strips tokens after login", async () => {
     const t = convexTest(schema, modules);
-    expect(await t.query(api.profiles.connectionStatus, {})).toEqual({ connected: false, profiles: [] });
-    await t.mutation(internal.meta.oauth.saveConnection, {
-      ownerEmail: "teresa@levelwell.com",
+    expect(await t.query(api.profiles.connectionStatus, { sessionToken: "bogus" })).toEqual({ connected: false, profiles: [] });
+    const { state } = await t.mutation(api.meta.oauth.start, {});
+    await t.mutation(internal.meta.oauth.consumeState, { state });
+    const connectionId = await t.mutation(internal.meta.oauth.saveConnection, {
       metaUserId: "u1",
       metaUserName: "Teresa",
       longLivedUserToken: "USER_SECRET",
       userTokenExpiresAt: 1,
       grantedScopes: ["pages_show_list"],
-      pages: [{ pageId: "p1", pageName: "LevelWell", pageAccessToken: "PAGE_SECRET", igUserId: "ig1", igUsername: "levelwell", webhookSubscribed: true }],
+      pages: [{ pageId: "p1", pageName: "LevelWell", pageAccessToken: "PAGE_SECRET", tasks: ["MANAGE"], igUserId: "ig1", igUsername: "levelwell", webhookSubscribed: true }],
     });
-    const status = await t.query(api.profiles.connectionStatus, {});
+    await t.mutation(internal.meta.oauth.finishState, { state, status: "completed", connectionId });
+    const { sessionToken } = await t.mutation(api.meta.oauth.claimSession, { state });
+    const status = await t.query(api.profiles.connectionStatus, { sessionToken });
     expect(status.connected).toBe(true);
-    expect(status.profiles[0]).toMatchObject({ pageName: "LevelWell", igUsername: "levelwell" });
+    expect(status.profiles[0]).toMatchObject({ pageName: "LevelWell", igUsername: "levelwell", status: "active" });
     expect(JSON.stringify(status)).not.toMatch(/SECRET/);
   });
 });

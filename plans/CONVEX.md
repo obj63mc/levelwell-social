@@ -67,7 +67,9 @@ Official Convex components (`npx convex import` per each package's README, regis
 
 ### Data model (current)
 - `connections` — one per Facebook user grant: long-lived user token (~60 d), granted scopes, status.
-- `profiles` — one per Facebook Page: never-expiring Page token, linked IG user id/username, `webhookSubscribed`, status (`active` | `needs_reconnect`).
+- `sessions` — app sessions minted after a Meta login (SHA-256 hash of the token only); every public function takes `sessionToken` and resolves it with `requireSession` (`convex/lib/session.ts`).
+- `profiles` — one per Facebook Page (+ linked IG user id/username, `webhookSubscribed`). **Shared by every Meta user who admins the Page**; holds no tokens.
+- `pageMembers` — (connection, profile) join: that manager's never-expiring Page token, Meta `tasks`, status (`active` | `needs_reconnect`). Rebuilt from `/me/accounts` on every login — Meta's Page roles are the source of truth; nothing is granted in-app.
 - `oauthStates` — CSRF state for the login flow; the desktop subscribes to it to learn the outcome (no deep link needed).
 - `webhookEvents` — raw, signature-verified Meta deliveries; the inbox worker (later) turns them into comments.
 - Env vars are declared in `convex/convex.config.ts` and read through the typed `env` export (never `process.env`).
@@ -77,8 +79,9 @@ Official Convex components (`npx convex import` per each package's README, regis
 - An official Rust client (`convex` crate) exists if the Tauri shell ever needs direct backend access — not planned for v1.
 
 ### Auth (app users)
-- **Convex Auth (`@convex-dev/auth`, Password provider) is installed by the template and kept, but no sign-in is required to use the app for now.** `authTables` stay in the schema, `convex/auth.ts` + HTTP routes remain wired, and the frontend uses `ConvexAuthProvider` without any `Authenticated` gating. If data needs a default owner before sign-in exists, the convention is **`teresa@levelwell.com`**.
-- Enabling sign-in later: run `npx @convex-dev/auth` once to generate the JWT env vars on the deployment, then add the sign-in UI. Convex Auth is still labeled beta; Clerk or `@convex-dev/better-auth` remain the alternatives if it proves limiting.
+- **The Facebook login is the app login; Convex Auth was removed.** Completing the Meta OAuth flow lets the desktop claim a single-use app session (`meta/oauth:claimSession`), stored in the webview's `localStorage` and sent as `sessionToken` with every call. `signOut` revokes a session; `disconnect` removes the Meta grant and its memberships.
+- **Scoping rule for every future table** (`posts`, `comments`, `messages`, …): carry `profileId` (+ an index starting with it) and `createdByConnectionId` for audit. Public functions do `requireSession` → `requirePageAccess(profileId)` and use `member.pageAccessToken` for Graph calls; background jobs use `pageTokenFor(profileId, preferConnectionId)`. Webhook processing routes `entry.id` → `profiles.by_pageId` / `by_igUserId`, so inbox rows attach to the Page regardless of who connected it.
+- Hardening later: move the desktop token from `localStorage` to the macOS Keychain.
 
 ## 5. Pricing & Limits Snapshot (2026)
 

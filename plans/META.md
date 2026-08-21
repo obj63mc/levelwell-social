@@ -37,6 +37,10 @@ Business permissions on newer apps are requested via a **Configuration** rather 
   | `instagram_content_publish` | Publish to IG |
   | `instagram_manage_comments` | Read/create/reply IG comments |
   | `business_management` | Business-asset traversal during connect |
+  | `pages_messaging` | **To add** — private replies (DM a commenter) on Facebook *and* Instagram |
+  | `instagram_manage_messages` | **To add** — Instagram DMs / messaging webhooks |
+
+  `pages_messaging` and `instagram_manage_messages` need **Advanced Access** via App Review before non-app-role users can be messaged. Add them to the configuration now so the next login grants them.
 
 - [x] Record the **`config_id`** → Convex env var `META_LOGIN_CONFIG_ID`. The authorize URL uses `config_id` (not `scope`).
 
@@ -95,6 +99,14 @@ The endpoint is live in `convex/http.ts` (GET handshake, POST HMAC validation �
 - First comment: IG `POST /{ig-media-id}/comments?message=…`; FB `POST /{page-post-id}/comments?message=…` (authored as the Page).
 - Replies: IG `POST /{ig-comment-id}/replies`; FB comment on the comment id.
 - Read/poll: `GET /{ig-media-id}/comments`, `GET /{page-post-id}/comments` with paging cursors.
+
+### Private replies (DM a commenter)
+- Same endpoint for both platforms: `POST /{page-id}/messages` with the Page token, `recipient: { comment_id }` (Facebook also accepts `post_id`), `message: { text }`. Instagram comments route through the linked Page id.
+- Window: within **7 days** of the comment (IG live-story comments: only during the broadcast).
+- **One private reply per commenter** per comment; the conversation continues only if they reply, which opens the standard 24-hour messaging window. Other Pages/business accounts cannot be targeted.
+- Instagram accounts must enable *Settings → Messages and story replies → Message controls → Connected Tools → Allow Access to Messages*.
+- Permissions: `pages_messaging` (+ `instagram_manage_comments` for IG, `instagram_manage_messages` for IG DMs, `pages_manage_metadata` for the `messages` webhook field). Page token must come from a user with the **MESSAGING** task. Dev mode: only app-role users can be messaged.
+- Webhook fields to add for replies landing in the inbox: Page `messages`, Instagram `messages`.
 
 ## 8. Setup Completion Checklist
 

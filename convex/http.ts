@@ -1,12 +1,9 @@
 import { httpRouter } from "convex/server";
 import { env, httpAction } from "./_generated/server";
 import { internal } from "./_generated/api";
-import { auth } from "./auth";
 import { verifySignature } from "./webhooks";
 
 const http = httpRouter();
-
-auth.addHttpRoutes(http);
 
 function page(title: string, body: string, status = 200): Response {
   const html = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title} · LevelWell Social</title>
