@@ -1,52 +1,60 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { CalendarClock, RotateCcw, XCircle } from "lucide-react";
+import { CalendarClock, ChevronDown, ChevronRight, RotateCcw, TriangleAlert, XCircle } from "lucide-react";
 import type { FunctionReturnType } from "convex/server";
 import { FacebookIcon, InstagramIcon } from "@/components/icons";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { fromLocalInputValue, toLocalInputValue } from "@/lib/media";
+import { STATUS_LABEL } from "@/lib/posts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 
-type Post = FunctionReturnType<typeof api.posts.list>[number];
+type Post = FunctionReturnType<typeof api.posts.listActive>[number];
 
-const STATUS_LABEL: Record<Post["status"], string> = {
-  scheduled: "Scheduled",
-  publishing: "Publishing…",
-  published: "Published",
-  partially_failed: "Partly failed",
-  failed: "Failed",
-  canceled: "Canceled",
-};
+const needsAttention = (post: Post) => post.status === "failed" || post.status === "partially_failed";
 
 export default function Queue({ sessionToken, profileId }: { sessionToken: string; profileId: Id<"profiles"> }) {
-  const posts = useQuery(api.posts.list, { sessionToken, profileId });
-  if (posts === undefined) return <Skeleton className="h-40 w-full" />;
-  if (posts.length === 0) {
-    return (
-      <Card>
-        <CardHeader>
-          <CardTitle>Queue</CardTitle>
-          <CardDescription>No posts yet. Use the buttons above to create one.</CardDescription>
-        </CardHeader>
-      </Card>
-    );
-  }
+  // null = follow the data: open when something failed, collapsed otherwise.
+  const [open, setOpen] = useState<boolean | null>(null);
+  const posts = useQuery(api.posts.listActive, { sessionToken, profileId });
+
+  if (posts === undefined) return <Skeleton className="h-24 w-full" />;
+  const problems = posts.filter(needsAttention).length;
+  const upcoming = posts.length - problems;
+  const expanded = open ?? problems > 0;
+
   return (
     <Card>
-      <CardHeader>
-        <CardTitle>Queue</CardTitle>
-        <CardDescription>Scheduled and recent posts for this Page.</CardDescription>
+      <CardHeader className="flex flex-wrap items-center justify-between gap-2">
+        <button
+          type="button"
+          className="flex items-center gap-2 text-left"
+          aria-expanded={expanded}
+          onClick={() => setOpen(!expanded)}
+        >
+          {expanded ? <ChevronDown className="size-4" /> : <ChevronRight className="size-4" />}
+          <CardTitle>Queue</CardTitle>
+          {problems > 0 && (
+            <Badge variant="destructive">
+              <TriangleAlert /> {problems} need{problems === 1 ? "s" : ""} attention
+            </Badge>
+          )}
+          <Badge variant="secondary">{upcoming} upcoming</Badge>
+        </button>
       </CardHeader>
-      <CardContent className="divide-y">
-        {posts.map((post) => (
-          <Row key={post._id} post={post} sessionToken={sessionToken} />
-        ))}
-      </CardContent>
+      {expanded && (
+        <CardContent className="divide-y">
+          {posts.length === 0 ? (
+            <CardDescription>Nothing scheduled. Use the buttons above to create a post.</CardDescription>
+          ) : (
+            posts.map((post) => <Row key={post._id} post={post} sessionToken={sessionToken} />)
+          )}
+        </CardContent>
+      )}
     </Card>
   );
 }
@@ -96,6 +104,11 @@ function Row({ post, sessionToken }: { post: Post; sessionToken: string }) {
         </div>
         <p className="truncate text-sm">{post.caption || <span className="text-muted-foreground">No caption</span>}</p>
         {(post.lastError || error) && <p className="text-destructive text-xs">{error ?? post.lastError}</p>}
+        {[post.facebook?.commentError, post.instagram?.commentError].filter(Boolean).map((message) => (
+          <p key={message} className="text-muted-foreground text-xs">
+            {message}
+          </p>
+        ))}
         {editing && (
           <div className="flex items-center gap-2 pt-1">
             <Input type="datetime-local" className="w-auto" value={when} onChange={(e) => setWhen(e.target.value)} />

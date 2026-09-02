@@ -18,6 +18,7 @@ import type * as meta_oauth from "../meta/oauth.js";
 import type * as posts from "../posts.js";
 import type * as profiles from "../profiles.js";
 import type * as publish from "../publish.js";
+import type * as seed from "../seed.js";
 import type * as system from "../system.js";
 import type * as webhooks from "../webhooks.js";
 
@@ -38,6 +39,7 @@ declare const fullApi: ApiFromModules<{
   posts: typeof posts;
   profiles: typeof profiles;
   publish: typeof publish;
+  seed: typeof seed;
   system: typeof system;
   webhooks: typeof webhooks;
 }>;

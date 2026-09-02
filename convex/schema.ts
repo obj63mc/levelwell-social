@@ -81,6 +81,7 @@ export default defineSchema({
     height: v.optional(v.number()),
     durationMs: v.optional(v.number()),
     status: v.union(v.literal("uploaded"), v.literal("attached"), v.literal("deleted")),
+    demo: v.optional(v.boolean()),
   })
     .index("by_profileId_and_status", ["profileId", "status"])
     .index("by_status", ["status"]),
@@ -90,7 +91,15 @@ export default defineSchema({
   posts: defineTable({
     profileId: v.id("profiles"),
     createdByConnectionId: v.id("connections"),
+    // `caption` is the composer's primary-channel text; the per-channel fields
+    // override it when the user edits the cross-posted copy separately.
     caption: v.string(),
+    fbCaption: v.optional(v.string()),
+    igCaption: v.optional(v.string()),
+    // Posted as a comment on the post itself right after it publishes — the
+    // place for links that don't belong in the body.
+    fbFirstComment: v.optional(v.string()),
+    igFirstComment: v.optional(v.string()),
     mediaIds: v.array(v.id("media")),
     targets: v.object({ facebook: v.boolean(), instagram: v.boolean() }),
     igFormat: v.union(v.literal("image"), v.literal("reel"), v.literal("carousel")),
@@ -119,6 +128,9 @@ export default defineSchema({
         postId: v.optional(v.string()),
         photoIds: v.optional(v.array(v.string())),
         videoId: v.optional(v.string()),
+        permalink: v.optional(v.string()),
+        commentId: v.optional(v.string()),
+        commentError: v.optional(v.string()),
         error: v.optional(v.string()),
         publishedAt: v.optional(v.number()),
       }),
@@ -129,11 +141,16 @@ export default defineSchema({
         creationId: v.optional(v.string()),
         childCreationIds: v.optional(v.array(v.string())),
         mediaId: v.optional(v.string()),
+        permalink: v.optional(v.string()),
+        commentId: v.optional(v.string()),
+        commentError: v.optional(v.string()),
         error: v.optional(v.string()),
         publishedAt: v.optional(v.number()),
       }),
     ),
     lastError: v.optional(v.string()),
+    // Dev-only rows from `npm run seed`: never enqueued on the publish pool.
+    demo: v.optional(v.boolean()),
   })
     .index("by_profileId_and_status", ["profileId", "status"])
     .index("by_profileId_and_scheduledAt", ["profileId", "scheduledAt"])

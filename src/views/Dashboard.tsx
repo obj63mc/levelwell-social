@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation } from "convex/react";
-import { CalendarDays, TriangleAlert, Unplug } from "lucide-react";
+import { TriangleAlert, Unplug } from "lucide-react";
 import type { FunctionReturnType } from "convex/server";
 import { FacebookIcon, InstagramIcon } from "@/components/icons";
 import { api } from "../../convex/_generated/api";
@@ -8,7 +8,6 @@ import { clearSessionToken } from "@/lib/session";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -18,6 +17,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import Calendar from "@/views/Calendar";
 import Composer, { type Channel } from "@/views/Composer";
 import Queue from "@/views/Queue";
 
@@ -106,8 +106,7 @@ export default function Dashboard({ status, sessionToken }: { status: Connection
             </Button>
             <Button
               size="lg"
-              variant="secondary"
-              className="h-16 text-base"
+              className="bg-teal text-teal-foreground hover:bg-teal/90 h-16 text-base"
               onClick={() => setComposing("instagram")}
               disabled={!primary?.igUsername}
             >
@@ -115,24 +114,12 @@ export default function Dashboard({ status, sessionToken }: { status: Connection
             </Button>
           </section>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <CalendarDays className="size-4" /> Calendar
-              </CardTitle>
-              <CardDescription>
-                Month view of scheduled posts — Facebook and Instagram icons per day, linking to each post. Coming once
-                posts are flowing (see plans/UI.md).
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="border-muted-foreground/30 text-muted-foreground flex h-40 items-center justify-center rounded-lg border border-dashed text-sm">
-                Calendar placeholder
-              </div>
-            </CardContent>
-          </Card>
-
-          {primary && <Queue sessionToken={sessionToken} profileId={primary._id} />}
+          {primary && (
+            <>
+              <Calendar sessionToken={sessionToken} profileId={primary._id} />
+              <Queue sessionToken={sessionToken} profileId={primary._id} />
+            </>
+          )}
         </>
       )}
     </main>

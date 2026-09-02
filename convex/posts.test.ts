@@ -57,7 +57,10 @@ function stubGraph(opts: { fail?: RegExp } = {}) {
       return new Response(JSON.stringify({ error: { message: "boom", code: 1 } }), { status: 400 });
     }
     let body: unknown = { id: `id_${++n}` };
-    if (path.endsWith("/content_publishing_limit")) body = { data: [{ quota_usage: 0, config: { quota_total: 100 } }] };
+    const fields = url.searchParams.get("fields");
+    if (fields === "permalink_url") body = { permalink_url: "https://www.facebook.com/p1/posts/123" };
+    else if (fields === "permalink") body = { permalink: "https://www.instagram.com/p/ABC123/" };
+    else if (path.endsWith("/content_publishing_limit")) body = { data: [{ quota_usage: 0, config: { quota_total: 100 } }] };
     else if (path.endsWith("/photos")) body = { id: `photo_${++n}`, post_id: `post_${n}` };
     else if (/\/(ig_[^/]+|id_\d+|child_\d+)$/.test(path) && url.searchParams.get("fields")?.includes("status_code")) {
       body = { status_code: "FINISHED" };
@@ -110,6 +113,65 @@ describe("posts.create", () => {
     await expect(t.mutation(api.posts.cancel, { sessionToken: other.sessionToken, postId })).rejects.toThrow(/forbidden/);
   });
 
+  test("listRange returns only the window, and stays Page-scoped", async () => {
+    const t = setup();
+    const { sessionToken, profileId } = await login(t, "a", "p1");
+    const start = Date.now() + 3600_000;
+    const inside = await upload(t, sessionToken, profileId);
+    const outside = await upload(t, sessionToken, profileId);
+    const base = { sessionToken, profileId, caption: "", targets: { facebook: true, instagram: false } };
+    const near = await t.mutation(api.posts.create, { ...base, mediaIds: [inside], scheduledAt: start + 60_000 });
+    await t.mutation(api.posts.create, { ...base, mediaIds: [outside], scheduledAt: start + 30 * 24 * 3600_000 });
+
+    const window = { sessionToken, profileId, start, end: start + 24 * 3600_000 };
+    expect((await t.query(api.posts.listRange, window)).map((p) => p._id)).toEqual([near]);
+
+    const other = await login(t, "b", "p2");
+    await expect(t.query(api.posts.listRange, { ...window, sessionToken: other.sessionToken })).rejects.toThrow(/forbidden/);
+  });
+
+  test("listActive is upcoming + failures only, oldest first", async () => {
+    const t = setup();
+    const { sessionToken, profileId } = await login(t, "a", "p1");
+    const soon = await upload(t, sessionToken, profileId);
+    const later = await upload(t, sessionToken, profileId);
+    const done = await upload(t, sessionToken, profileId);
+    const base = { sessionToken, profileId, caption: "", targets: { facebook: true, instagram: false } };
+    const second = await t.mutation(api.posts.create, { ...base, mediaIds: [later], scheduledAt: Date.now() + 7200_000 });
+    const first = await t.mutation(api.posts.create, { ...base, mediaIds: [soon], scheduledAt: Date.now() + 3600_000 });
+    const publishedId = await t.mutation(api.posts.create, { ...base, mediaIds: [done], scheduledAt: Date.now() + 3600_000 });
+    await t.run((ctx) => ctx.db.patch("posts", publishedId, { status: "published" }));
+
+    expect((await t.query(api.posts.listActive, { sessionToken, profileId })).map((p) => p._id)).toEqual([first, second]);
+
+    await t.run((ctx) => ctx.db.patch("posts", second, { status: "failed" }));
+    const active = await t.query(api.posts.listActive, { sessionToken, profileId });
+    expect(active.map((p) => p.status)).toEqual(["scheduled", "failed"]);
+  });
+
+  test("seeded demo posts never reach the publish pool", async () => {
+    const t = setup();
+    const calls = stubGraph();
+    const { sessionToken, profileId } = await login(t, "a", "p1");
+    const { posts, media } = await t.action(internal.seed.run, {});
+    expect(posts).toBeGreaterThan(0);
+    expect(calls).toHaveLength(0); // the seed never talks to Meta
+
+    const seeded = await t.query(api.posts.list, { sessionToken, profileId });
+    expect(seeded).toHaveLength(posts);
+    expect(seeded.every((p) => p.demo)).toBe(true);
+    expect(await t.run(async (ctx) => (await ctx.db.query("posts").collect()).every((p) => p.workId === undefined))).toBe(true);
+    expect(seeded.some((p) => p.scheduledAt < Date.now())).toBe(true);
+    expect(seeded.some((p) => p.scheduledAt > Date.now())).toBe(true);
+
+    const broken = seeded.find((p) => p.status === "failed")!;
+    await expect(t.mutation(api.posts.retry, { sessionToken, postId: broken._id })).rejects.toThrow(/Demo posts/);
+
+    const cleared = await t.mutation(internal.seed.clear, {});
+    expect(cleared).toEqual({ posts, media });
+    expect(await t.query(api.posts.list, { sessionToken, profileId })).toEqual([]);
+  });
+
   test("cancel releases media; reschedule moves the time", async () => {
     const t = setup();
     const { sessionToken, profileId } = await login(t, "a", "p1");
@@ -142,6 +204,42 @@ describe("publish.run", () => {
     expect(igCreate.url.searchParams.get("access_token")).toBe("TOK_a");
   });
 
+  test("records each channel's permalink, and survives a permalink lookup that fails", async () => {
+    const t = setup();
+    stubGraph();
+    const { sessionToken, profileId } = await login(t, "a", "p1");
+    const img = await upload(t, sessionToken, profileId);
+    const postId = await t.mutation(api.posts.create, {
+      sessionToken,
+      profileId,
+      caption: "hi",
+      mediaIds: [img],
+      targets: { facebook: true, instagram: true },
+      scheduledAt: Date.now() + 3600_000,
+    });
+    await t.action(internal.publish.run, { postId });
+    expect(await t.query(api.posts.get, { sessionToken, postId })).toMatchObject({
+      facebook: { status: "published", permalink: "https://www.facebook.com/p1/posts/123" },
+      instagram: { status: "published", permalink: "https://www.instagram.com/p/ABC123/" },
+    });
+
+    // A permalink lookup that errors is cosmetic: the post still publishes.
+    stubGraph({ fail: /^\/v[\d.]+\/(post|photo|igmedia)_/ });
+    const img2 = await upload(t, sessionToken, profileId);
+    const second = await t.mutation(api.posts.create, {
+      sessionToken,
+      profileId,
+      caption: "hi",
+      mediaIds: [img2],
+      targets: { facebook: true, instagram: false },
+      scheduledAt: Date.now() + 3600_000,
+    });
+    await t.action(internal.publish.run, { postId: second });
+    const post = await t.query(api.posts.get, { sessionToken, postId: second });
+    expect(post).toMatchObject({ facebook: { status: "published" } });
+    expect(post?.facebook?.permalink).toBeUndefined();
+  });
+
   test("a failed channel is retried without re-posting the successful one", async () => {
     const t = setup();
     stubGraph({ fail: /\/media_publish$/ });
@@ -159,6 +257,57 @@ describe("publish.run", () => {
     expect(post?.instagram?.status).toBe("published");
     expect(retryCalls.some((c) => c.url.pathname.endsWith("/photos"))).toBe(false); // Facebook not re-posted
     expect(retryCalls.some((c) => c.url.pathname.endsWith("/ig_p1/media"))).toBe(false); // container reused
+  });
+
+  test("each channel gets its own caption and first comment", async () => {
+    const t = setup();
+    const calls = stubGraph();
+    const { sessionToken, profileId } = await login(t, "a", "p1");
+    const img = await upload(t, sessionToken, profileId);
+    const postId = await t.mutation(api.posts.create, {
+      sessionToken,
+      profileId,
+      caption: "fb text",
+      igCaption: "ig text",
+      fbFirstComment: "fb link",
+      igFirstComment: "ig link",
+      mediaIds: [img],
+      targets: { facebook: true, instagram: true },
+      scheduledAt: Date.now() + 3600_000,
+    });
+    await t.action(internal.publish.run, { postId });
+
+    expect(calls.find((c) => c.url.pathname.endsWith("/p1/photos"))!.url.searchParams.get("caption")).toBe("fb text");
+    expect(calls.find((c) => c.url.pathname.endsWith("/ig_p1/media"))!.url.searchParams.get("caption")).toBe("ig text");
+    const comments = calls.filter((c) => c.url.pathname.endsWith("/comments"));
+    expect(comments.map((c) => c.url.searchParams.get("message"))).toEqual(["fb link", "ig link"]);
+    const post = await t.run((ctx) => ctx.db.get("posts", postId));
+    expect(post?.facebook?.commentId).toBeDefined();
+    expect(post?.instagram?.commentId).toBeDefined();
+  });
+
+  test("a failed first comment does not fail the post, and is not retried twice", async () => {
+    const t = setup();
+    stubGraph({ fail: /\/comments$/ });
+    const { sessionToken, profileId } = await login(t, "a", "p1");
+    const img = await upload(t, sessionToken, profileId);
+    const postId = await t.mutation(api.posts.create, {
+      sessionToken,
+      profileId,
+      caption: "hi",
+      fbFirstComment: "link",
+      mediaIds: [img],
+      targets: { facebook: true, instagram: false },
+      scheduledAt: Date.now() + 3600_000,
+    });
+    await t.action(internal.publish.run, { postId });
+    const post = await t.run((ctx) => ctx.db.get("posts", postId));
+    expect(post?.facebook).toMatchObject({ status: "published", commentError: expect.stringMatching(/First comment failed/) });
+
+    // Republishing skips the already-published channel entirely.
+    const retryCalls = stubGraph();
+    await t.action(internal.publish.run, { postId });
+    expect(retryCalls).toHaveLength(0);
   });
 
   test("carousel creates children then the parent; token error flags the member", async () => {

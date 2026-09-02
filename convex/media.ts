@@ -91,6 +91,7 @@ export const cleanup = internalMutation({
       .withIndex("by_status", (q) => q.eq("status", "published").lt("_creationTime", now - PUBLISHED_RETENTION_MS))
       .take(25);
     for (const post of posts) {
+      if (post.demo) continue; // seeded dev rows keep their thumbnails
       for (const mediaId of post.mediaIds) {
         const media = await ctx.db.get("media", mediaId);
         if (!media || media.status === "deleted") continue;

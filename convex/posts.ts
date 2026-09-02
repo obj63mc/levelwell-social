@@ -24,6 +24,8 @@ const igOptions = v.object({
 const channelResult = v.object({
   status: v.union(v.literal("pending"), v.literal("published"), v.literal("failed")),
   error: v.optional(v.string()),
+  commentError: v.optional(v.string()),
+  permalink: v.optional(v.string()),
   publishedAt: v.optional(v.number()),
 });
 
@@ -32,6 +34,10 @@ export const postSummary = v.object({
   _creationTime: v.number(),
   profileId: v.id("profiles"),
   caption: v.string(),
+  fbCaption: v.optional(v.string()),
+  igCaption: v.optional(v.string()),
+  fbFirstComment: v.optional(v.string()),
+  igFirstComment: v.optional(v.string()),
   targets: v.object({ facebook: v.boolean(), instagram: v.boolean() }),
   igFormat: v.union(v.literal("image"), v.literal("reel"), v.literal("carousel")),
   fbFormat: v.union(v.literal("photo"), v.literal("multi_photo"), v.literal("video"), v.literal("reel")),
@@ -48,6 +54,7 @@ export const postSummary = v.object({
   facebook: v.optional(channelResult),
   instagram: v.optional(channelResult),
   lastError: v.optional(v.string()),
+  demo: v.optional(v.boolean()),
   media: v.array(v.object({ _id: v.id("media"), kind: v.union(v.literal("image"), v.literal("video")), url: v.union(v.string(), v.null()) })),
 });
 
@@ -58,12 +65,17 @@ async function toSummary(ctx: QueryCtx | MutationCtx, post: Doc<"posts">) {
     if (!m) continue;
     media.push({ _id: m._id, kind: m.kind, url: m.status === "deleted" ? null : await ctx.storage.getUrl(m.storageId) });
   }
-  const channel = (c?: Doc<"posts">["facebook"]) => (c ? { status: c.status, error: c.error, publishedAt: c.publishedAt } : undefined);
+  const channel = (c?: Doc<"posts">["facebook"]) =>
+    c ? { status: c.status, error: c.error, commentError: c.commentError, permalink: c.permalink, publishedAt: c.publishedAt } : undefined;
   return {
     _id: post._id,
     _creationTime: post._creationTime,
     profileId: post.profileId,
     caption: post.caption,
+    fbCaption: post.fbCaption,
+    igCaption: post.igCaption,
+    fbFirstComment: post.fbFirstComment,
+    igFirstComment: post.igFirstComment,
     targets: post.targets,
     igFormat: post.igFormat,
     fbFormat: post.fbFormat,
@@ -73,6 +85,7 @@ async function toSummary(ctx: QueryCtx | MutationCtx, post: Doc<"posts">) {
     facebook: channel(post.facebook),
     instagram: channel(post.instagram),
     lastError: post.lastError,
+    demo: post.demo,
     media,
   };
 }
@@ -93,6 +106,12 @@ async function loadPost(ctx: QueryCtx | MutationCtx, session: Session, postId: I
 }
 
 async function enqueue(ctx: MutationCtx, post: Doc<"posts">, runAt: number) {
+  // Seeded dev rows are never published: this is the one choke point every
+  // caller goes through, so they can't reach Meta by any path.
+  if (post.demo) {
+    await ctx.db.patch("posts", post._id, { status: "scheduled", scheduledAt: runAt, lastError: undefined });
+    return;
+  }
   const workId = await publishPool.enqueueAction(
     ctx,
     internal.publish.run,
@@ -108,6 +127,10 @@ export const create = mutation({
     ...sessionArgs,
     profileId: v.id("profiles"),
     caption: v.string(),
+    fbCaption: v.optional(v.string()),
+    igCaption: v.optional(v.string()),
+    fbFirstComment: v.optional(v.string()),
+    igFirstComment: v.optional(v.string()),
     mediaIds: v.array(v.id("media")),
     targets: v.object({ facebook: v.boolean(), instagram: v.boolean() }),
     ig: v.optional(igOptions),
@@ -128,10 +151,17 @@ export const create = mutation({
       throw new ConvexError("Schedule at least a minute from now, or post now.");
     }
     const caption = args.caption.trim();
+    const fbCaption = args.fbCaption?.trim();
+    const igCaption = args.igCaption?.trim();
     if (args.targets.instagram) {
-      if (caption.length > IG_CAPTION_MAX) throw new ConvexError(`Instagram captions are limited to ${IG_CAPTION_MAX} characters.`);
-      if (countMatches(caption, /#\w/g) > IG_HASHTAG_MAX) throw new ConvexError(`Instagram allows at most ${IG_HASHTAG_MAX} hashtags.`);
-      if (countMatches(caption, /@\w/g) > IG_MENTION_MAX) throw new ConvexError(`Instagram allows at most ${IG_MENTION_MAX} @mentions.`);
+      const igText = igCaption ?? caption;
+      if (igText.length > IG_CAPTION_MAX) throw new ConvexError(`Instagram captions are limited to ${IG_CAPTION_MAX} characters.`);
+      if (countMatches(igText, /#\w/g) > IG_HASHTAG_MAX) throw new ConvexError(`Instagram allows at most ${IG_HASHTAG_MAX} hashtags.`);
+      if (countMatches(igText, /@\w/g) > IG_MENTION_MAX) throw new ConvexError(`Instagram allows at most ${IG_MENTION_MAX} @mentions.`);
+      const firstComment = args.igFirstComment?.trim();
+      if (firstComment && firstComment.length > IG_CAPTION_MAX) {
+        throw new ConvexError(`Instagram comments are limited to ${IG_CAPTION_MAX} characters.`);
+      }
     }
 
     const media: Doc<"media">[] = [];
@@ -170,6 +200,10 @@ export const create = mutation({
       profileId: args.profileId,
       createdByConnectionId: session.connection._id,
       caption,
+      fbCaption: args.targets.facebook && fbCaption && fbCaption !== caption ? fbCaption : undefined,
+      igCaption: args.targets.instagram && igCaption && igCaption !== caption ? igCaption : undefined,
+      fbFirstComment: args.targets.facebook ? args.fbFirstComment?.trim() || undefined : undefined,
+      igFirstComment: args.targets.instagram ? args.igFirstComment?.trim() || undefined : undefined,
       mediaIds: args.mediaIds,
       targets: args.targets,
       igFormat,
@@ -225,8 +259,33 @@ export const retry = mutation({
     const session = await requireSession(ctx, args.sessionToken);
     const post = await loadPost(ctx, session, args.postId);
     if (post.status !== "failed" && post.status !== "partially_failed") throw new ConvexError("Only failed posts can be retried.");
+    if (post.demo) throw new ConvexError("Demo posts can't be published.");
     await enqueue(ctx, post, Date.now());
     return null;
+  },
+});
+
+/** The queue: posts still to publish plus anything that failed. No history. */
+export const listActive = query({
+  args: { ...sessionArgs, profileId: v.id("profiles") },
+  returns: v.array(postSummary),
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.sessionToken);
+    await requirePageAccess(ctx, session, args.profileId);
+    const statuses = ["scheduled", "publishing", "partially_failed", "failed"] as const;
+    const posts: Doc<"posts">[] = [];
+    for (const status of statuses) {
+      posts.push(
+        ...(await ctx.db
+          .query("posts")
+          .withIndex("by_profileId_and_status", (q) => q.eq("profileId", args.profileId).eq("status", status))
+          .take(100)),
+      );
+    }
+    posts.sort((a, b) => a.scheduledAt - b.scheduledAt);
+    const out = [];
+    for (const post of posts) out.push(await toSummary(ctx, post));
+    return out;
   },
 });
 
@@ -241,6 +300,25 @@ export const list = query({
       .withIndex("by_profileId_and_scheduledAt", (q) => q.eq("profileId", args.profileId))
       .order("desc")
       .take(100);
+    const out = [];
+    for (const post of posts) out.push(await toSummary(ctx, post));
+    return out;
+  },
+});
+
+/** Posts scheduled in [start, end) — the calendar's visible grid, oldest first. */
+export const listRange = query({
+  args: { ...sessionArgs, profileId: v.id("profiles"), start: v.number(), end: v.number() },
+  returns: v.array(postSummary),
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.sessionToken);
+    await requirePageAccess(ctx, session, args.profileId);
+    const posts = await ctx.db
+      .query("posts")
+      .withIndex("by_profileId_and_scheduledAt", (q) =>
+        q.eq("profileId", args.profileId).gte("scheduledAt", args.start).lt("scheduledAt", args.end),
+      )
+      .take(500);
     const out = [];
     for (const post of posts) out.push(await toSummary(ctx, post));
     return out;

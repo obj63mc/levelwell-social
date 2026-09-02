@@ -68,6 +68,9 @@ export const recordChannel = internalMutation({
       creationId: v.optional(v.string()),
       childCreationIds: v.optional(v.array(v.string())),
       mediaId: v.optional(v.string()),
+      permalink: v.optional(v.string()),
+      commentId: v.optional(v.string()),
+      commentError: v.optional(v.string()),
       error: v.optional(v.string()),
       publishedAt: v.optional(v.number()),
     }),
@@ -138,6 +141,62 @@ const IG_POLL_MAX_MS = 5 * 60_000;
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** The text a channel actually publishes: its own edit, else the shared caption. */
+function captionFor(post: Doc<"posts">, channel: "facebook" | "instagram"): string {
+  return (channel === "facebook" ? post.fbCaption : post.igCaption) ?? post.caption;
+}
+
+/**
+ * Posts the first comment on a just-published post. A failure here never fails
+ * the post itself — it is recorded on the channel so the queue can show it.
+ */
+async function postFirstComment(
+  ctx: ActionCtxLike,
+  post: Doc<"posts">,
+  channel: "facebook" | "instagram",
+  objectId: string | undefined,
+  token: string,
+) {
+  const message = (channel === "facebook" ? post.fbFirstComment : post.igFirstComment)?.trim();
+  if (!message) return;
+  const fresh = (await ctx.runQuery(internal.publish.getPost, { postId: post._id })) as Doc<"posts">;
+  if (fresh[channel]?.commentId) return; // already posted on an earlier attempt
+  const record = (patch: Record<string, unknown>) =>
+    ctx.runMutation(internal.publish.recordChannel, { postId: post._id, channel, patch });
+  if (!objectId) {
+    await record({ commentError: "Published, but the post id needed to add the first comment was missing." });
+    return;
+  }
+  try {
+    const res = await graphPost<{ id: string }>(`${objectId}/comments`, { message }, token);
+    await record({ commentId: res.id, commentError: undefined });
+  } catch (error) {
+    await record({ commentError: `First comment failed: ${describeError(error)}` });
+  }
+}
+
+/**
+ * Best-effort: the public URL of what we just published, so the calendar can
+ * link out to it. A missing permalink never fails a published post.
+ */
+async function recordPermalink(
+  ctx: ActionCtxLike,
+  post: Doc<"posts">,
+  channel: "facebook" | "instagram",
+  objectId: string | undefined,
+  token: string,
+) {
+  if (!objectId) return;
+  const field = channel === "facebook" ? "permalink_url" : "permalink";
+  try {
+    const res = await graphGet<Record<string, string>>(objectId, { fields: field }, token);
+    const permalink = res[field];
+    if (permalink) await ctx.runMutation(internal.publish.recordChannel, { postId: post._id, channel, patch: { permalink } });
+  } catch {
+    // The post is live either way; the detail panel just won't offer a link.
+  }
+}
+
 type ActionCtxLike = { runMutation: (ref: any, args: any) => Promise<any>; runQuery: (ref: any, args: any) => Promise<any> };
 
 export const run = internalAction({
@@ -182,6 +241,7 @@ export const run = internalAction({
 
 async function publishFacebook(ctx: ActionCtxLike, { post, profile, token, media }: Begin) {
   const pageId = profile.pageId;
+  const caption = captionFor(post, "facebook");
   const fresh = (await ctx.runQuery(internal.publish.getPost, { postId: post._id })) as Doc<"posts">;
   const state = fresh.facebook ?? { status: "pending" as const };
   const record = (patch: Record<string, unknown>) =>
@@ -189,8 +249,11 @@ async function publishFacebook(ctx: ActionCtxLike, { post, profile, token, media
 
   switch (post.fbFormat) {
     case "photo": {
-      const res = await graphPost<{ id: string; post_id?: string }>(`${pageId}/photos`, { url: media[0].url, caption: post.caption, alt_text_custom: post.ig.altText }, token);
-      await record({ postId: res.post_id ?? res.id, photoIds: [res.id] });
+      const res = await graphPost<{ id: string; post_id?: string }>(`${pageId}/photos`, { url: media[0].url, caption, alt_text_custom: post.ig.altText }, token);
+      const postId = res.post_id ?? res.id;
+      await record({ postId, photoIds: [res.id] });
+      await recordPermalink(ctx, post, "facebook", postId, token);
+      await postFirstComment(ctx, post, "facebook", postId, token);
       return;
     }
     case "multi_photo": {
@@ -202,15 +265,19 @@ async function publishFacebook(ctx: ActionCtxLike, { post, profile, token, media
       }
       const res = await graphPost<{ id: string }>(
         `${pageId}/feed`,
-        { message: post.caption, attached_media: JSON.stringify(photoIds.map((id) => ({ media_fbid: id }))) },
+        { message: caption, attached_media: JSON.stringify(photoIds.map((id) => ({ media_fbid: id }))) },
         token,
       );
       await record({ postId: res.id });
+      await recordPermalink(ctx, post, "facebook", res.id, token);
+      await postFirstComment(ctx, post, "facebook", res.id, token);
       return;
     }
     case "video": {
-      const res = await graphPost<{ id: string }>(`${pageId}/videos`, { file_url: media[0].url, description: post.caption }, token);
+      const res = await graphPost<{ id: string }>(`${pageId}/videos`, { file_url: media[0].url, description: caption }, token);
       await record({ videoId: res.id, postId: res.id });
+      await recordPermalink(ctx, post, "facebook", res.id, token);
+      await postFirstComment(ctx, post, "facebook", res.id, token);
       return;
     }
     case "reel": {
@@ -227,10 +294,12 @@ async function publishFacebook(ctx: ActionCtxLike, { post, profile, token, media
       }
       await graphPost<{ success: boolean }>(
         `${pageId}/video_reels`,
-        { upload_phase: "finish", video_id: videoId, video_state: "PUBLISHED", description: post.caption },
+        { upload_phase: "finish", video_id: videoId, video_state: "PUBLISHED", description: caption },
         token,
       );
       await record({ postId: videoId });
+      await recordPermalink(ctx, post, "facebook", videoId, token);
+      await postFirstComment(ctx, post, "facebook", videoId, token);
       return;
     }
   }
@@ -256,6 +325,7 @@ async function waitForContainer(creationId: string, token: string) {
 async function publishInstagram(ctx: ActionCtxLike, { post, profile, token, media, coverUrl }: Begin) {
   const igUserId = profile.igUserId;
   if (!igUserId) throw new Error("This Page has no linked Instagram account.");
+  const caption = captionFor(post, "instagram");
   const fresh = (await ctx.runQuery(internal.publish.getPost, { postId: post._id })) as Doc<"posts">;
   const state = fresh.instagram ?? { status: "pending" as const };
   const record = (patch: Record<string, unknown>) =>
@@ -284,7 +354,7 @@ async function publishInstagram(ctx: ActionCtxLike, { post, profile, token, medi
       case "image": {
         const res = await graphPost<{ id: string }>(
           `${igUserId}/media`,
-          { image_url: media[0].url, caption: post.caption, alt_text: post.ig.altText, ...common },
+          { image_url: media[0].url, caption, alt_text: post.ig.altText, ...common },
           token,
         );
         creationId = res.id;
@@ -296,7 +366,7 @@ async function publishInstagram(ctx: ActionCtxLike, { post, profile, token, medi
           {
             media_type: "REELS",
             video_url: media[0].url,
-            caption: post.caption,
+            caption,
             share_to_feed: post.ig.shareToFeed ?? true,
             cover_url: coverUrl,
             thumb_offset: coverUrl ? undefined : post.ig.thumbOffsetMs,
@@ -324,7 +394,7 @@ async function publishInstagram(ctx: ActionCtxLike, { post, profile, token, medi
         for (const child of children) await waitForContainer(child, token);
         const res = await graphPost<{ id: string }>(
           `${igUserId}/media`,
-          { media_type: "CAROUSEL", children: children.join(","), caption: post.caption, collaborators: common.collaborators },
+          { media_type: "CAROUSEL", children: children.join(","), caption, collaborators: common.collaborators },
           token,
         );
         creationId = res.id;
@@ -337,4 +407,6 @@ async function publishInstagram(ctx: ActionCtxLike, { post, profile, token, medi
   await waitForContainer(creationId, token);
   const published = await graphPost<{ id: string }>(`${igUserId}/media_publish`, { creation_id: creationId }, token);
   await record({ mediaId: published.id });
+  await recordPermalink(ctx, post, "instagram", published.id, token);
+  await postFirstComment(ctx, post, "instagram", published.id, token);
 }

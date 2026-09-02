@@ -5,7 +5,7 @@ What each screen of the desktop app contains. Built with shadcn/ui (base-nova st
 | Page | Status |
 |---|---|
 | Connect (first launch) | built |
-| Dashboard (landing) | shell built; calendar **to define** |
+| Dashboard (landing) | built (calendar, quick post, queue) |
 | Post detail | to define |
 | Composer | to define |
 | Queue | to define |
@@ -28,12 +28,15 @@ Shown whenever no Meta connection exists for the owner (`api.profiles.connection
 ## Dashboard (landing) — `src/views/Dashboard.tsx`
 - Top-right **avatar button** (Page picture) → dropdown: each Page (picture, name, category, `@instagram` badge or "No Instagram linked", needs-reconnect / webhook badges), "Connected as {Facebook name}", and **Disconnect** (removes this Meta user's grant and ends the session; Pages and content stay for other managers). No page title.
 - **Quick post**: two large buttons with brand icons — **Post to Facebook** / **Post to Instagram** — open the Composer inline with that channel preselected.
-- **Queue** (below the calendar): scheduled and recent posts with thumbnail, status, per-channel status badges, time; Reschedule / Cancel (scheduled), Retry (failed).
-- **Calendar — to define** (placeholder card today). Agreed requirements:
-  - Month grid of the **current month** (with previous/next navigation).
-  - Each day shows one icon per scheduled post: **Facebook icon** for a Facebook Page post, **Instagram icon** for an Instagram post (a post targeting both shows both).
-  - Each icon links to that post's **in-app Post detail page** — never to the live post on facebook.com/instagram.com.
-  - Open questions for the UI session: day-cell overflow ("+3"), status colouring (scheduled / published / failed), click on an empty day → Composer pre-filled with that date, week view.
+- **Queue** (below the calendar): a collapsible card listing only what still needs action — scheduled/publishing posts plus failures (`api.posts.listActive`), oldest first. Published history lives on the calendar, not here. The header carries an "N upcoming" badge and a destructive "N need attention" badge when anything failed; it starts expanded whenever there are failures, collapsed otherwise, and the user's click wins from then on. Rows: thumbnail, status, per-channel badges, time; Reschedule / Cancel (scheduled), Retry (failed).
+- **Calendar** — `src/views/Calendar.tsx`, built. Month grid (6 fixed weeks, Sunday-first, local time), ‹ / › month navigation + **Today**; each day carries one chip per post (Facebook and/or Instagram icon + time, tinted by status), two chips per day then "+N more" expands the cell.
+  - Clicking a chip opens an **in-app detail panel** below the grid: thumbnail, caption (plus per-channel caption when it differs), first comment, full date, overall + per-channel status, errors.
+  - **Supersedes the earlier "never link to the live post" rule**: the detail panel offers **Open on Facebook / Open on Instagram** for channels that published, from the `permalink` now recorded at publish time (`recordPermalink` in `convex/publish.ts`, stored on the post's channel sub-object). Posts published before permalinks existed show "No link recorded".
+  - Data comes from `api.posts.listRange({ profileId, start, end })` over the visible grid, so the panel stays live-reactive.
+  - Still open: click an empty day → Composer pre-filled with that date, week view, a full Post detail page.
+
+## Dev seed data
+`npm run seed` fills the dev deployment with ~12 posts across last month and this month (published with permalinks, scheduled, failed, partly failed) plus three placeholder thumbnails, so the calendar and queue can be worked on without publishing to a real Page. Rows carry `demo: true`, are never enqueued on the publish workpool (`posts.enqueue` refuses them), and `npm run seed:clear` removes exactly those rows and their files.
 
 ## Post detail — to define
 Target of the calendar icons. Expected: caption(s), media, per-platform status and platform post ids, schedule time, first comment, publish log/errors, actions (edit, reschedule, cancel, retry).
@@ -43,7 +46,7 @@ Page picker (if several) · channel toggles (Facebook / Instagram, IG disabled w
 Profile picker (Page and/or linked IG), caption with per-platform override, media upload (drag-drop / native picker → Convex storage), first-comment field, publish now vs. schedule (date-time), IG quota indicator.
 
 ## Queue — `src/views/Queue.tsx` (lives on the Dashboard for now)
-Chronological list of scheduled/publishing/failed posts with live status; bulk cancel/retry. Likely the same data as the calendar in list form.
+Chronological list of scheduled/publishing/failed posts with live status. Still open: bulk cancel/retry.
 
 ## Inbox — to define
 Email-client layout: thread list (unread bold, platform icon, post thumbnail) + conversation pane with reply box; mark read/unread; new comments appear live from webhooks/polling. Per comment: **Reply publicly** and **Send private reply** (DM; disabled after 7 days or once used — see META.md §7). The inbox is per Page, shared by all its managers.
