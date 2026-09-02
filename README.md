@@ -15,7 +15,26 @@ npm run dev:app     # convex dev (backend sync) + tauri dev (desktop app)
 
 Or in two terminals: `npm run dev:convex` and `npm run tauri dev`.
 
-Other scripts: `npm run lint`, `npm run build` (frontend only), `npm run tauri build` (macOS .app/.dmg).
+Other scripts: `npm run lint`, `npm run build` (frontend only), `npm run tauri build` (macOS .app/.dmg), `npm run seed` / `npm run seed:clear` (dev-only demo posts).
+
+## Releasing
+
+`npm run tauri build` reads `.env.production`, so the bundle points at the prod
+Convex deployment (`npm run dev` keeps using `.env.local`). Confirm before
+shipping: the prod URL must appear in `dist/assets/index-*.js` and the dev one
+must not.
+
+The bundle is ad-hoc signed (`bundle.macOS.signingIdentity: "-"`) but not
+notarized. On a Mac that downloaded it, macOS blocks the first launch: open
+**System Settings → Privacy & Security**, scroll to the blocked-app notice and
+click **Open Anyway**. Or clear the quarantine flag directly:
+
+```bash
+xattr -dr com.apple.quarantine "/Applications/LevelWell Social.app"
+```
+
+Notarizing (an Apple Developer Program membership plus `APPLE_ID` /
+`APPLE_PASSWORD` / `APPLE_TEAM_ID` in the build env) is what removes that step.
 
 ## Planning docs
 
