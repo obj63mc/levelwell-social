@@ -19,9 +19,9 @@ tauri-build = { version = "2.6.3", features = [] }
 serde_json = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 tauri = { version = "2.11.5", features = ["tray-icon"] }
-tauri-plugin-opener = "2.5.4"
-tauri-plugin-dialog = "2.7.2"
-tauri-plugin-notification = "2.3.3"
+tauri-plugin-opener = "2.5.5"
+tauri-plugin-dialog = "2.7.3"
+tauri-plugin-notification = "2.4.0"
 
 # Dev only: show our icon in the Dock when running the bare `tauri dev` binary
 # (release builds get it from the .app bundle's icon.icns).
