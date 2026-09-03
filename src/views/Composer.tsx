@@ -1,6 +1,6 @@
 import { useMemo, useRef, useState } from "react";
 import { useConvex, useMutation } from "convex/react";
-import { AlertCircle, ArrowDown, ArrowUp, CalendarClock, ImagePlus, Info, Link2, Send, X } from "lucide-react";
+import { AlertCircle, ArrowDown, ArrowUp, CalendarClock, ImagePlus, Info, Send, X } from "lucide-react";
 import { FacebookIcon, InstagramIcon } from "@/components/icons";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -52,11 +52,12 @@ export default function Composer({ sessionToken, profiles, initialChannel, onDon
   const [uploading, setUploading] = useState(0);
   const [caption, setCaption] = useState("");
   const [firstComment, setFirstComment] = useState("");
-  // While "linked", the cross-post copy tracks the primary text; the first edit unlinks it.
+  // The cross-post fields are seeded once from the primary channel the first time
+  // cross-posting is switched on; after that they belong to the user alone.
   const [crossCaption, setCrossCaption] = useState("");
-  const [captionLinked, setCaptionLinked] = useState(true);
   const [crossComment, setCrossComment] = useState("");
-  const [commentLinked, setCommentLinked] = useState(true);
+  const [captionOwned, setCaptionOwned] = useState(false);
+  const [commentOwned, setCommentOwned] = useState(false);
   const [collaborators, setCollaborators] = useState("");
   const [userTags, setUserTags] = useState("");
   const [altText, setAltText] = useState("");
@@ -71,10 +72,8 @@ export default function Composer({ sessionToken, profiles, initialChannel, onDon
 
   const facebook = primary === "facebook" || (crossPost && secondary === "facebook");
   const instagram = primary === "instagram" || (crossPost && secondary === "instagram");
-  const secondaryCaption = captionLinked ? caption : crossCaption;
-  const secondaryComment = commentLinked ? firstComment : crossComment;
-  const textFor = (channel: Channel) => (channel === primary ? caption : secondaryCaption);
-  const commentFor = (channel: Channel) => (channel === primary ? firstComment : secondaryComment);
+  const textFor = (channel: Channel) => (channel === primary ? caption : crossCaption);
+  const commentFor = (channel: Channel) => (channel === primary ? firstComment : crossComment);
   const igText = instagram ? textFor("instagram") : "";
   const igComment = instagram ? commentFor("instagram") : "";
 
@@ -143,8 +142,8 @@ export default function Composer({ sessionToken, profiles, initialChannel, onDon
         profileId,
         caption,
         // Only the cross-posted channel can differ from the primary caption.
-        fbCaption: facebook && secondary === "facebook" && crossPost ? secondaryCaption : undefined,
-        igCaption: instagram && secondary === "instagram" && crossPost ? secondaryCaption : undefined,
+        fbCaption: facebook && secondary === "facebook" && crossPost ? crossCaption : undefined,
+        igCaption: instagram && secondary === "instagram" && crossPost ? crossCaption : undefined,
         fbFirstComment: facebook ? commentFor("facebook") : undefined,
         igFirstComment: instagram ? commentFor("instagram") : undefined,
         mediaIds: media.map((m) => m.mediaId),
@@ -166,6 +165,23 @@ export default function Composer({ sessionToken, profiles, initialChannel, onDon
     }
   }
 
+  /** Copies the primary text across once, the first time cross-posting is switched on. */
+  function toggleCrossPost(on: boolean) {
+    if (on) {
+      // Only copy when there is something to copy — an empty copy leaves the field
+      // open to being seeded on a later toggle.
+      if (!captionOwned && caption) {
+        setCrossCaption(caption);
+        setCaptionOwned(true);
+      }
+      if (!commentOwned && firstComment) {
+        setCrossComment(firstComment);
+        setCommentOwned(true);
+      }
+    }
+    setCrossPost(on);
+  }
+
   const channelName = (channel: Channel) =>
     channel === "facebook" ? `Facebook · ${profile.pageName}` : `Instagram · @${profile.igUsername ?? ""}`;
 
@@ -174,19 +190,19 @@ export default function Composer({ sessionToken, profiles, initialChannel, onDon
     const isSecondary = channel === secondary;
     const text = textFor(channel);
     const comment = commentFor(channel);
+    // Any edit — including clearing the field — claims it, so it is never rewritten.
     const setText = isSecondary
       ? (value: string) => {
-          setCaptionLinked(false);
+          setCaptionOwned(true);
           setCrossCaption(value);
         }
       : setCaption;
     const setComment = isSecondary
       ? (value: string) => {
-          setCommentLinked(false);
+          setCommentOwned(true);
           setCrossComment(value);
         }
       : setFirstComment;
-    const linked = isSecondary && captionLinked;
 
     return (
       <div className="space-y-4">
@@ -194,15 +210,6 @@ export default function Composer({ sessionToken, profiles, initialChannel, onDon
           <div className="flex items-center justify-between gap-2">
             <Label htmlFor={`caption-${channel}`}>Caption</Label>
             <div className="flex items-center gap-3">
-              {isSecondary && !linked && (
-                <button
-                  type="button"
-                  className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs"
-                  onClick={() => setCaptionLinked(true)}
-                >
-                  <Link2 className="size-3" /> Match {CHANNEL_LABEL[primary]}
-                </button>
-              )}
               {channel === "instagram" && (
                 <span className={`text-xs ${text.length > IG_CAPTION_MAX ? "text-destructive" : "text-muted-foreground"}`}>
                   {text.length}/{IG_CAPTION_MAX} · {hashtags}/30 # · {mentions}/20 @
@@ -217,26 +224,12 @@ export default function Composer({ sessionToken, profiles, initialChannel, onDon
             onChange={(e) => setText(e.target.value)}
             placeholder={isSecondary ? `Caption for ${CHANNEL_LABEL[channel]}…` : "Write your caption…"}
           />
-          {isSecondary && linked && (
-            <p className="text-muted-foreground text-xs">Copied from {CHANNEL_LABEL[primary]} — edit it here to write a separate caption.</p>
-          )}
         </div>
 
         {channel === "instagram" ? instagramOptions() : facebookOptions()}
 
         <div className="space-y-2">
-          <div className="flex items-center justify-between gap-2">
-            <Label htmlFor={`comment-${channel}`}>First comment</Label>
-            {isSecondary && !commentLinked && (
-              <button
-                type="button"
-                className="text-muted-foreground hover:text-foreground flex items-center gap-1 text-xs"
-                onClick={() => setCommentLinked(true)}
-              >
-                <Link2 className="size-3" /> Match {CHANNEL_LABEL[primary]}
-              </button>
-            )}
-          </div>
+          <Label htmlFor={`comment-${channel}`}>First comment</Label>
           <Textarea
             id={`comment-${channel}`}
             rows={3}
@@ -419,7 +412,7 @@ export default function Composer({ sessionToken, profiles, initialChannel, onDon
               id="crosspost"
               checked={crossPost}
               disabled={!secondaryAvailable}
-              onCheckedChange={setCrossPost}
+              onCheckedChange={toggleCrossPost}
               aria-label={`Cross-post to ${CHANNEL_LABEL[secondary]}`}
             />
           </div>
@@ -432,7 +425,7 @@ export default function Composer({ sessionToken, profiles, initialChannel, onDon
               {channelFields(secondary)}
             </>
           ) : (
-            <p className="text-muted-foreground text-xs">Publish the same media to {channelName(secondary)} with its own caption.</p>
+            <p className="text-muted-foreground text-xs">Publish the same media to {channelName(secondary)} — it starts with a copy of the caption above, then you can edit it.</p>
           )}
         </div>
 

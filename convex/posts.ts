@@ -211,8 +211,10 @@ export const create = mutation({
       profileId: args.profileId,
       createdByConnectionId: session.connection._id,
       caption,
-      fbCaption: args.targets.facebook && fbCaption && fbCaption !== caption ? fbCaption : undefined,
-      igCaption: args.targets.instagram && igCaption && igCaption !== caption ? igCaption : undefined,
+      // An empty per-channel caption is kept: a cross-post caption the user cleared on
+      // purpose must not fall back to the shared one at publish time.
+      fbCaption: args.targets.facebook && fbCaption !== undefined && fbCaption !== caption ? fbCaption : undefined,
+      igCaption: args.targets.instagram && igCaption !== undefined && igCaption !== caption ? igCaption : undefined,
       fbFirstComment: args.targets.facebook ? args.fbFirstComment?.trim() || undefined : undefined,
       igFirstComment: args.targets.instagram ? args.igFirstComment?.trim() || undefined : undefined,
       mediaIds: args.mediaIds,
