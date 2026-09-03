@@ -1,6 +1,6 @@
 [package]
 name = "levelwell-social"
-version = "0.0.2"
+version = "0.0.3"
 description = "LevelWell Social — Facebook & Instagram posting and scheduling for macOS"
 authors = ["LevelWell"]
 license = ""
