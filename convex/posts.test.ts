@@ -223,6 +223,25 @@ describe("publish.run", () => {
       instagram: { status: "published", permalink: "https://www.instagram.com/p/ABC123/" },
     });
 
+    // Facebook hands back a site-relative path for a reel; it is stored absolute
+    // so the desktop app can pass it to the OS.
+    vi.stubGlobal("fetch", async (input: string | URL) => {
+      const url = new URL(String(input));
+      const body = url.searchParams.get("fields") === "permalink_url" ? { permalink_url: "/reel/123/" } : { id: "vid_1", video_id: "vid_1", upload_url: "u", success: true };
+      return new Response(JSON.stringify(body), { status: 200 });
+    });
+    const vid = await upload(t, sessionToken, profileId, "video");
+    const reel = await t.mutation(api.posts.create, { sessionToken, profileId, caption: "", mediaIds: [vid], fbAsReel: true, targets: { facebook: true, instagram: false }, scheduledAt: Date.now() + 3600_000 });
+    await t.action(internal.publish.run, { postId: reel });
+    expect(await t.run((ctx) => ctx.db.get("posts", reel))).toMatchObject({
+      facebook: { permalink: "https://www.facebook.com/reel/123/" },
+    });
+    // Rows stored before that normalization existed are fixed on the way out.
+    await t.run((ctx) => ctx.db.patch("posts", reel, { facebook: { status: "published" as const, permalink: "/reel/456/" } }));
+    expect(await t.query(api.posts.get, { sessionToken, postId: reel })).toMatchObject({
+      facebook: { permalink: "https://www.facebook.com/reel/456/" },
+    });
+
     // A permalink lookup that errors is cosmetic: the post still publishes.
     stubGraph({ fail: /^\/v[\d.]+\/(post|photo|igmedia)_/ });
     const img2 = await upload(t, sessionToken, profileId);
@@ -330,5 +349,148 @@ describe("publish.run", () => {
     const p2 = await t.mutation(api.posts.create, { sessionToken, profileId, caption: "", mediaIds: [c], targets: { facebook: true, instagram: false }, scheduledAt: Date.now() + 3600_000 });
     await expect(t.action(internal.publish.run, { postId: p2 })).rejects.toThrow(/code 190/);
     expect((await t.query(api.profiles.list, { sessionToken }))[0].status).toBe("needs_reconnect");
+  });
+});
+
+describe("media cleanup", () => {
+  /** Runs the purge that onComplete schedules with runAfter(0). */
+  async function settleScheduled(t: ReturnType<typeof convexTest>) {
+    vi.useFakeTimers();
+    try {
+      await t.finishAllScheduledFunctions(vi.runAllTimers);
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
+  /** Drives a post through publish and then the workpool completion hook. */
+  async function publishAndSettle(t: ReturnType<typeof convexTest>, postId: Id<"posts">) {
+    await t.action(internal.publish.run, { postId });
+    await t.mutation(internal.publish.onComplete, {
+      workId: "w" as never,
+      context: { postId },
+      result: { kind: "success", returnValue: null },
+    });
+    await settleScheduled(t);
+  }
+
+  const files = (t: ReturnType<typeof convexTest>) => t.run(async (ctx) => (await ctx.db.system.query("_storage").collect()).length);
+
+  test("a clean publish deletes every media row and file, cover included", async () => {
+    const t = setup();
+    stubGraph();
+    const { sessionToken, profileId } = await login(t, "a", "p1");
+    const vid = await upload(t, sessionToken, profileId, "video");
+    const cover = await upload(t, sessionToken, profileId);
+    expect(await files(t)).toBe(2);
+    const postId = await t.mutation(api.posts.create, {
+      sessionToken,
+      profileId,
+      caption: "hi",
+      mediaIds: [vid],
+      targets: { facebook: false, instagram: true },
+      ig: { collaborators: [], userTags: [], coverMediaId: cover },
+      scheduledAt: Date.now() + 3600_000,
+    });
+    await publishAndSettle(t, postId);
+
+    const post = await t.run((ctx) => ctx.db.get("posts", postId));
+    expect(post?.status).toBe("published");
+    expect(post?.mediaIds).toEqual([]);
+    expect(post?.ig.coverMediaId).toBeUndefined();
+    expect(await t.run(async (ctx) => (await ctx.db.query("media").collect()).length)).toBe(0);
+    expect(await files(t)).toBe(0);
+    // The post still renders — toSummary tolerates the missing ids.
+    expect(await t.query(api.posts.get, { sessionToken, postId })).toMatchObject({ media: [] });
+  });
+
+  test("a failed first comment still purges: the post is live and never re-run", async () => {
+    const t = setup();
+    stubGraph({ fail: /\/comments$/ });
+    const { sessionToken, profileId } = await login(t, "a", "p1");
+    const img = await upload(t, sessionToken, profileId);
+    const postId = await t.mutation(api.posts.create, {
+      sessionToken, profileId, caption: "hi", mediaIds: [img], fbFirstComment: "link",
+      targets: { facebook: true, instagram: false }, scheduledAt: Date.now() + 3600_000,
+    });
+    await publishAndSettle(t, postId);
+    // The comment is an extra on a post that is already live; the files are not
+    // needed to fix it, so they go.
+    expect(await t.run((ctx) => ctx.db.get("posts", postId))).toMatchObject({
+      status: "published",
+      mediaIds: [],
+      facebook: { commentError: expect.stringMatching(/First comment failed/) },
+    });
+    expect(await t.run((ctx) => ctx.db.get("media", img))).toBeNull();
+  });
+
+  test("a retryable error keeps the media: lastError, partial failure, demo", async () => {
+    const t = setup();
+    const { sessionToken, profileId } = await login(t, "a", "p1");
+    const base = { sessionToken, profileId, caption: "hi", targets: { facebook: true, instagram: false }, scheduledAt: Date.now() + 3600_000 };
+    stubGraph();
+
+    // A published post carrying a lastError keeps its media.
+    const kept = await upload(t, sessionToken, profileId);
+    const withError = await t.mutation(api.posts.create, { ...base, mediaIds: [kept] });
+    await t.run((ctx) => ctx.db.patch("posts", withError, { status: "published", lastError: "something went wrong" }));
+    await t.mutation(internal.media.cleanup, {});
+    expect(await t.run((ctx) => ctx.db.get("media", kept))).not.toBeNull();
+
+    // A partially failed post keeps its media so retry still has files to send.
+    stubGraph({ fail: /\/media_publish$/ });
+    const both = await upload(t, sessionToken, profileId);
+    const partial = await t.mutation(api.posts.create, { ...base, mediaIds: [both], targets: { facebook: true, instagram: true } });
+    await expect(t.action(internal.publish.run, { postId: partial })).rejects.toThrow(/instagram/);
+    await t.mutation(internal.publish.onComplete, {
+      workId: "w" as never,
+      context: { postId: partial },
+      result: { kind: "failed", error: "instagram: boom" },
+    });
+    await settleScheduled(t);
+    expect(await t.run((ctx) => ctx.db.get("posts", partial))).toMatchObject({ status: "partially_failed" });
+    expect(await t.run((ctx) => ctx.db.get("media", both))).not.toBeNull();
+    await t.mutation(api.posts.retry, { sessionToken, postId: partial });
+
+    // Demo rows keep their thumbnails.
+    const demo = await upload(t, sessionToken, profileId);
+    const demoPost = await t.mutation(api.posts.create, { ...base, mediaIds: [demo] });
+    await t.run((ctx) => ctx.db.patch("posts", demoPost, { status: "published", demo: true }));
+    await t.mutation(internal.media.cleanup, {});
+    expect(await t.run((ctx) => ctx.db.get("media", demo))).not.toBeNull();
+  });
+
+  test("cleanup drains abandoned uploads and old tombstones, then converges", async () => {
+    const t = setup();
+    stubGraph();
+    const { sessionToken, profileId } = await login(t, "a", "p1");
+    const abandoned = await upload(t, sessionToken, profileId);
+    const tombstoned = await upload(t, sessionToken, profileId);
+    // Shape of a row the old 7-day retention left behind: bytes gone, row kept.
+    await t.run(async (ctx) => {
+      const media = (await ctx.db.get("media", tombstoned))!;
+      await ctx.storage.delete(media.storageId);
+      await ctx.db.patch("media", tombstoned, { status: "deleted" });
+    });
+    // A post published before this sweep existed still holds its media.
+    const stale = await upload(t, sessionToken, profileId);
+    const stalePost = await t.mutation(api.posts.create, {
+      sessionToken, profileId, caption: "", mediaIds: [stale], targets: { facebook: true, instagram: false }, scheduledAt: Date.now() + 3600_000,
+    });
+    await t.run((ctx) => ctx.db.patch("posts", stalePost, { status: "published", facebook: { status: "published" } }));
+
+    // A recent abandoned upload is still within its 24 h grace period.
+    await t.mutation(internal.media.cleanup, {});
+    expect(await t.run((ctx) => ctx.db.get("media", abandoned))).not.toBeNull();
+    expect(await t.run((ctx) => ctx.db.get("media", tombstoned))).toBeNull();
+    expect(await t.run((ctx) => ctx.db.get("media", stale))).toBeNull();
+    expect(await t.run((ctx) => ctx.db.get("posts", stalePost))).toMatchObject({ mediaIds: [] });
+
+    vi.setSystemTime(Date.now() + 25 * 3600_000);
+    await t.mutation(internal.media.cleanup, {});
+    expect(await t.run((ctx) => ctx.db.get("media", abandoned))).toBeNull();
+    expect(await t.run(async (ctx) => (await ctx.db.query("media").collect()).length)).toBe(0);
+    expect(await t.run(async (ctx) => (await ctx.db.system.query("_storage").collect()).length)).toBe(0);
+    vi.useRealTimers();
   });
 });

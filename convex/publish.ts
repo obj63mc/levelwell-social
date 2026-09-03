@@ -4,6 +4,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { internalAction, internalMutation, internalQuery } from "./_generated/server";
 import { pageTokenFor } from "./lib/session";
+import { isFullyPublished } from "./media";
 import { describeError, GraphApiError, graphGet, graphPost, graphVersion } from "./meta/client";
 
 // ---------- state transitions (mutations) ----------
@@ -121,6 +122,10 @@ export const onComplete = internalMutation({
     else status = "failed";
     const lastError = result.kind === "failed" && errors.length === 0 ? result.error : errors.join(" · ") || undefined;
     await ctx.db.patch("posts", post._id, { status, workId: undefined, lastError: status === "published" ? undefined : lastError });
+    // Meta already holds the bytes, so a clean publish releases our copy. Scheduled
+    // rather than inlined: a purge failure must not roll back the status write.
+    const settled = await ctx.db.get("posts", post._id);
+    if (settled && isFullyPublished(settled)) await ctx.scheduler.runAfter(0, internal.media.purgePost, { postId: post._id });
     return null;
   },
 });
@@ -176,6 +181,18 @@ async function postFirstComment(
 }
 
 /**
+ * Meta is inconsistent: Instagram always answers with a full URL, but Facebook
+ * returns a site-relative path for some object types — a reel comes back as
+ * "/reel/123/". A schemeless string is not something the desktop app can hand
+ * to the OS, so it is made absolute before it is ever stored.
+ */
+export function absolutePermalink(permalink: string, channel: "facebook" | "instagram"): string {
+  if (/^https?:\/\//i.test(permalink)) return permalink;
+  const base = channel === "facebook" ? "https://www.facebook.com" : "https://www.instagram.com";
+  return `${base}/${permalink.replace(/^\/+/, "")}`;
+}
+
+/**
  * Best-effort: the public URL of what we just published, so the calendar can
  * link out to it. A missing permalink never fails a published post.
  */
@@ -191,7 +208,13 @@ async function recordPermalink(
   try {
     const res = await graphGet<Record<string, string>>(objectId, { fields: field }, token);
     const permalink = res[field];
-    if (permalink) await ctx.runMutation(internal.publish.recordChannel, { postId: post._id, channel, patch: { permalink } });
+    if (permalink) {
+      await ctx.runMutation(internal.publish.recordChannel, {
+        postId: post._id,
+        channel,
+        patch: { permalink: absolutePermalink(permalink, channel) },
+      });
+    }
   } catch {
     // The post is live either way; the detail panel just won't offer a link.
   }

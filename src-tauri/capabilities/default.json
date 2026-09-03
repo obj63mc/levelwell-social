@@ -12,6 +12,8 @@
       "allow": [
         { "url": "https://www.facebook.com/*" },
         { "url": "https://*.facebook.com/*" },
+        { "url": "https://www.instagram.com/*" },
+        { "url": "https://*.instagram.com/*" },
         { "url": "https://*.convex.site/*" }
       ]
     }

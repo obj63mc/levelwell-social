@@ -3,6 +3,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { publishPool } from "./lib/pool";
+import { absolutePermalink } from "./publish";
 import { requirePageAccess, requireSession, sessionArgs, type Session } from "./lib/session";
 
 export const IG_CAPTION_MAX = 2200;
@@ -65,8 +66,18 @@ async function toSummary(ctx: QueryCtx | MutationCtx, post: Doc<"posts">) {
     if (!m) continue;
     media.push({ _id: m._id, kind: m.kind, url: m.status === "deleted" ? null : await ctx.storage.getUrl(m.storageId) });
   }
-  const channel = (c?: Doc<"posts">["facebook"]) =>
-    c ? { status: c.status, error: c.error, commentError: c.commentError, permalink: c.permalink, publishedAt: c.publishedAt } : undefined;
+  // Normalized on the way out too: rows written before permalinks were made
+  // absolute still hold a relative Facebook path.
+  const channel = (c: Doc<"posts">["facebook"], name: "facebook" | "instagram") =>
+    c
+      ? {
+          status: c.status,
+          error: c.error,
+          commentError: c.commentError,
+          permalink: c.permalink ? absolutePermalink(c.permalink, name) : undefined,
+          publishedAt: c.publishedAt,
+        }
+      : undefined;
   return {
     _id: post._id,
     _creationTime: post._creationTime,
@@ -82,8 +93,8 @@ async function toSummary(ctx: QueryCtx | MutationCtx, post: Doc<"posts">) {
     ig: post.ig,
     scheduledAt: post.scheduledAt,
     status: post.status,
-    facebook: channel(post.facebook),
-    instagram: channel(post.instagram),
+    facebook: channel(post.facebook, "facebook"),
+    instagram: channel(post.instagram, "instagram"),
     lastError: post.lastError,
     demo: post.demo,
     media,

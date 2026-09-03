@@ -19,10 +19,19 @@ Other scripts: `npm run lint`, `npm run build` (frontend only), `npm run tauri b
 
 ## Releasing
 
+```bash
+npm run release -- patch     # bump, build, verify, tag, publish to GitHub
+npm run release -- patch --dry-run
+```
+
+`scripts/release.sh` runs the checks, keeps the version in sync across
+`package.json` / `tauri.conf.json` / `Cargo.toml`, builds the `.dmg`, verifies
+the bundle points at prod Convex (and not dev), then tags and publishes a GitHub
+release. Full runbook and the manual equivalent: [`plans/BUILD.md`](plans/BUILD.md).
+
 `npm run tauri build` reads `.env.production`, so the bundle points at the prod
-Convex deployment (`npm run dev` keeps using `.env.local`). Confirm before
-shipping: the prod URL must appear in `dist/assets/index-*.js` and the dev one
-must not.
+Convex deployment (`npm run dev` keeps using `.env.local`). Backend-only changes
+ship with `npx convex deploy` and need no new build.
 
 The bundle is ad-hoc signed (`bundle.macOS.signingIdentity: "-"`) but not
 notarized. On a Mac that downloaded it, macOS blocks the first launch: open
@@ -42,3 +51,4 @@ Notarizing (an Apple Developer Program membership plus `APPLE_ID` /
 - [`plans/CONVEX.md`](plans/CONVEX.md) — Convex setup and platform facts
 - [`plans/META.md`](plans/META.md) — Meta developer app setup
 - [`plans/SETUP.md`](plans/SETUP.md) — macOS dev environment
+- [`plans/BUILD.md`](plans/BUILD.md) — build & release runbook

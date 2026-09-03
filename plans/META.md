@@ -42,6 +42,16 @@ Business permissions on newer apps are requested via a **Configuration** rather 
 
   `pages_messaging` and `instagram_manage_messages` need **Advanced Access** via App Review before non-app-role users can be messaged. Add them to the configuration now so the next login grants them.
 
+- [ ] **`pages_manage_engagement` gotcha — first comments fail without it.** A production reel published fine but recorded
+  `commentError: "(#200) The permission(s) pages_manage_engagement are not available. It could because either they are deprecated or need to be approved by App Review."`
+  The permalink lookup on the same object with the same Page token succeeded moments earlier, so the token and the object id were fine — the permission simply was not on the token. Checklist when this recurs:
+  - The permission must be present in **two** places: the app's **use case** (App Dashboard → Use cases → "Manage everything on your Page" → Customize — it ships enabled but can be removed) *and* the **Facebook Login for Business configuration** named by `META_LOGIN_CONFIG_ID`. Adding it to the use case alone is not enough; the authorize URL requests the configuration.
+  - Its dependencies must be present too: `pages_read_user_content` and `pages_show_list`.
+  - Check the deployment: `npx convex env get META_LOGIN_CONFIG_ID --prod` may name a *different* configuration than dev.
+  - **A configuration change does not affect existing tokens.** The stored Page token was minted without the permission and will never gain it — reconnect (re-run OAuth) so `saveConnection` writes a fresh token, then confirm with `npx convex data connections --prod` that `grantedScopes` contains `pages_manage_engagement`, or `GET /{version}/me/permissions?access_token=<page token>`.
+  - In **Development** mode app-role users get Standard Access automatically; in **Live** mode this permission needs Advanced Access via App Review.
+  - A failed first comment is never retried: `postFirstComment` (`convex/publish.ts`) skips only when `commentId` is set, and published posts are never re-run. Add the missed comment by hand.
+
 - [x] Record the **`config_id`** → Convex env var `META_LOGIN_CONFIG_ID`. The authorize URL uses `config_id` (not `scope`).
 
 ## 4. OAuth Redirect Configuration
