@@ -23,7 +23,7 @@ Useful flags:
 
 ## What the script does, in order
 
-1. **Preflight.** Requires `.env.production`, `cargo`, an authenticated `gh`,
+1. **Preflight.** Requires `cargo`, an authenticated `gh`,
    the `main` branch, a clean working tree, and `main` in sync with
    `origin/main`. Any of these missing stops the release before anything
    changes.
@@ -33,13 +33,18 @@ Useful flags:
    `src-tauri/Cargo.toml`. It also refuses to continue if the tag or the
    GitHub release already exists. On any failure from here to the commit, the
    version files are restored.
-4. **Build** — `npm run tauri build`. This runs `npm run build`, which Vite
-   runs in production mode, so the bundle reads **`.env.production`** (dev uses
-   `.env.local`). Output lands in `src-tauri/target/release/bundle/`.
+4. **Build** — `npm run tauri build -- --config src-tauri/tauri.release.conf.json`.
+   That overlay swaps `beforeBuildCommand` for `npm run build:release`, i.e.
+   `vite build --mode release`, whose `define` blanks `VITE_CONVEX_URL` and
+   `VITE_CONVEX_SITE_URL`. **A published build carries no deployment**; the app
+   asks for one on first launch. (The blanking has to happen in `vite.config.ts`
+   because Vite loads `.env.local` in *every* mode, `release` included.) Output
+   lands in `src-tauri/target/release/bundle/`.
 5. **Bundle verification** — the guard rail that matters most:
-   - the prod `VITE_CONVEX_URL` **is** present in `dist/assets`;
-   - the dev `VITE_CONVEX_URL` **is not** (a dev-pointed bundle shipped to a
-     manager would write to the wrong deployment);
+   - **no** `https://<name>.convex.cloud|site` URL survives in `dist/assets`
+     (`happy-otter-123` excepted — that is the example in the Convex client's own
+     error message, not a deployment). A leaked URL would point every download at
+     that backend;
    - the `.app` passes `codesign --verify`.
 6. **Commit, tag, push** — `chore: release vX.Y.Z`, an annotated tag, both
    pushed to `origin`.
@@ -55,12 +60,11 @@ npm run lint && npm run test
 # 2. bump all three files to the same version
 #    package.json · src-tauri/tauri.conf.json · src-tauri/Cargo.toml
 
-# 3. build (reads .env.production)
-npm run tauri build
+# 3. build with no deployment baked in
+npm run tauri build -- --config src-tauri/tauri.release.conf.json
 
-# 4. verify the bundle points at prod, and only prod
-grep -rF "$(grep '^VITE_CONVEX_URL=' .env.production | cut -d= -f2-)" dist/assets
-grep -rF "$(grep '^VITE_CONVEX_URL=' .env.local      | cut -d= -f2-)" dist/assets   # must find nothing
+# 4. verify no deployment URL survived (must print nothing)
+grep -rhoE 'https://[a-z0-9-]+\.convex\.(cloud|site)' dist/assets | grep -v happy-otter-123
 codesign --verify --strict "src-tauri/target/release/bundle/macos/LevelWell Social.app"
 
 # 5. commit and tag
@@ -103,7 +107,10 @@ build environment, which turns on Tauri's notarization step.
 **Secrets.** `.env.production` holds `META_APP_SECRET` and is gitignored — keep
 it that way. Vite only inlines `VITE_`-prefixed variables into the bundle, so
 the Meta secret never reaches the shipped app; it lives in the Convex
-deployment's environment variables.
+deployment's environment variables. Since `release` mode blanks the two `VITE_`
+vars as well, a published `.dmg` contains no deployment identifiers at all — a
+plain `npm run build` / `npm run tauri build` still bakes in whatever `.env.*`
+provides, so use those for local runs, not for anything you hand out.
 
 **Prerequisites** (one-time): Node 26 (`.nvmrc`), Rust via rustup, Xcode Command
 Line Tools, and `gh auth login`. See [`SETUP.md`](./SETUP.md).

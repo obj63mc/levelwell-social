@@ -41,7 +41,6 @@ done
 
 step "Preflight"
 
-[[ -f .env.production ]] || die ".env.production is missing — the build would point at the wrong Convex deployment."
 command -v cargo >/dev/null || die "cargo not found. Install Rust: https://rustup.rs"
 command -v gh >/dev/null || die "gh not found. Install the GitHub CLI: brew install gh"
 gh auth status >/dev/null 2>&1 || die "gh is not authenticated. Run: gh auth login"
@@ -112,25 +111,23 @@ node -e '
 # -------------------------------------------------------------------- build
 
 step "Building the macOS bundle ($ARCH_LABEL)"
-# `tauri build` runs `npm run build`, which Vite runs in production mode — so the
-# bundle picks up .env.production, not .env.local.
+# The overlay config swaps beforeBuildCommand for `npm run build:release`, whose
+# `release` Vite mode blanks VITE_CONVEX_URL / VITE_CONVEX_SITE_URL. A published
+# build must ship with no deployment baked in — the app asks on first launch.
 # Expanded this way because macOS ships bash 3.2, where "${arr[@]}" on an
 # empty array trips `set -u`.
-npm run tauri build ${TARGET_FLAGS[@]+"--" "${TARGET_FLAGS[@]}"}
+npm run tauri build -- --config src-tauri/tauri.release.conf.json ${TARGET_FLAGS[@]+"${TARGET_FLAGS[@]}"}
 
-step "Verifying the bundle points at production Convex"
-PROD_URL="$(grep -E '^VITE_CONVEX_URL=' .env.production | cut -d= -f2- | tr -d '"'"'"' \r')"
-[[ -n "$PROD_URL" ]] || die "VITE_CONVEX_URL is not set in .env.production."
-grep -rqF "$PROD_URL" dist/assets || die "the prod Convex URL is not in the built assets — check .env.production."
-echo "prod URL present: $PROD_URL"
-
-if [[ -f .env.local ]]; then
-  DEV_URL="$(grep -E '^VITE_CONVEX_URL=' .env.local | cut -d= -f2- | tr -d '"'"'"' \r' || true)"
-  if [[ -n "$DEV_URL" && "$DEV_URL" != "$PROD_URL" ]]; then
-    grep -rqF "$DEV_URL" dist/assets && die "the DEV Convex URL leaked into the bundle. Do not ship this."
-    echo "dev URL absent: ok"
-  fi
+step "Verifying no Convex deployment leaked into the bundle"
+# `happy-otter-123` is the example URL in the convex client's own error message,
+# not a deployment; everything else is a real backend the download would call.
+FOUND="$(grep -rhoE 'https://[a-z0-9-]+\.convex\.(cloud|site)' dist/assets \
+  | grep -v 'happy-otter-123' | sort -u || true)"
+if [[ -n "$FOUND" ]]; then
+  echo "$FOUND" >&2
+  die "a Convex deployment URL is in the built assets. Do not ship this."
 fi
+echo "no deployment URL in the bundle: ok"
 
 DMG="$(ls -t "$BUNDLE_DIR"/*.dmg 2>/dev/null | head -1 || true)"
 [[ -n "$DMG" && -f "$DMG" ]] || die "no .dmg found in $BUNDLE_DIR"
@@ -152,6 +149,13 @@ NOTES_FILE="$(mktemp)"
   else
     git log --no-merges --pretty='- %s' -20
   fi
+  echo
+  echo "## First run"
+  echo
+  echo "This build ships with no backend configured. On first launch the app asks"
+  echo "for the Convex deployment it should use — deploy your own with"
+  echo '`npx convex deploy` and paste the two URLs it prints. See the README for'
+  echo "the full setup (Convex deployment + your own Meta developer app)."
   echo
   echo "## Install"
   echo

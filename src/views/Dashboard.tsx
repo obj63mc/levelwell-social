@@ -1,9 +1,10 @@
 import { useState } from "react";
 import { useMutation } from "convex/react";
-import { TriangleAlert, Unplug } from "lucide-react";
+import { Server, TriangleAlert, Unplug } from "lucide-react";
 import type { FunctionReturnType } from "convex/server";
 import { FacebookIcon, InstagramIcon } from "@/components/icons";
 import { api } from "../../convex/_generated/api";
+import { clearDeployment, useDeployment } from "@/lib/deployment";
 import { clearSessionToken } from "@/lib/session";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
@@ -26,6 +27,7 @@ export type ProfileSummary = ConnectionStatus["profiles"][number];
 
 export default function Dashboard({ status, sessionToken }: { status: ConnectionStatus; sessionToken: string }) {
   const disconnect = useMutation(api.meta.oauth.disconnect);
+  const deployment = useDeployment();
   const connection = status.connection!;
   const primary = status.profiles[0];
   const [composing, setComposing] = useState<Channel | null>(null);
@@ -36,6 +38,13 @@ export default function Dashboard({ status, sessionToken }: { status: Connection
     } finally {
       clearSessionToken();
     }
+  }
+
+  // A session token is minted by one deployment and meaningless on another, so
+  // dropping the deployment drops the session with it.
+  function changeDeployment() {
+    clearSessionToken();
+    clearDeployment();
   }
 
   return (
@@ -82,7 +91,15 @@ export default function Dashboard({ status, sessionToken }: { status: Connection
             <DropdownMenuSeparator />
             <DropdownMenuGroup>
               <DropdownMenuLabel className="font-normal">Connected as {connection.metaUserName} on Facebook</DropdownMenuLabel>
+              {deployment && (
+                <DropdownMenuLabel className="text-muted-foreground truncate text-xs font-normal">
+                  {deployment.convexUrl.replace(/^https:\/\//, "")}
+                </DropdownMenuLabel>
+              )}
             </DropdownMenuGroup>
+            <DropdownMenuItem onClick={changeDeployment}>
+              <Server /> Change Convex deployment…
+            </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" onClick={() => void end()}>
               <Unplug /> Disconnect
             </DropdownMenuItem>
