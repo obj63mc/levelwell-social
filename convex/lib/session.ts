@@ -60,6 +60,20 @@ export async function pageTokenFor(
   profileId: Id<"profiles">,
   preferConnectionId?: Id<"connections">,
 ): Promise<{ token: string; connectionId: Id<"connections"> } | null> {
+  // System-user mode: the Page owns its credential, so it does not matter which
+  // manager triggered the work — or whether that manager is still connected.
+  const profile = await ctx.db.get("profiles", profileId);
+  if (profile?.pageAccessToken) {
+    const owner =
+      preferConnectionId ??
+      (
+        await ctx.db
+          .query("pageMembers")
+          .withIndex("by_profileId", (q) => q.eq("profileId", profileId))
+          .take(1)
+      )[0]?.connectionId;
+    if (owner) return { token: profile.pageAccessToken, connectionId: owner };
+  }
   if (preferConnectionId) {
     const preferred = await ctx.db
       .query("pageMembers")

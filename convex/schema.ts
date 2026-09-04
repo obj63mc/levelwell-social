@@ -37,6 +37,9 @@ export default defineSchema({
     igUsername: v.optional(v.string()),
     igProfilePictureUrl: v.optional(v.string()),
     webhookSubscribed: v.boolean(),
+    // System-user mode: one never-expiring Page token belonging to the business
+    // portfolio, shared by every manager. Preferred over pageMembers tokens.
+    pageAccessToken: v.optional(v.string()),
   })
     .index("by_pageId", ["pageId"])
     .index("by_igUserId", ["igUserId"]),
@@ -149,12 +152,67 @@ export default defineSchema({
       }),
     ),
     lastError: v.optional(v.string()),
+    // Optional Webflow CMS item created after the social post goes live. A
+    // failure here is recorded but never changes the post's own status.
+    webflow: v.optional(
+      v.object({
+        name: v.string(),
+        postCopy: v.optional(v.string()),
+        blogItemId: v.optional(v.string()),
+        blogItemName: v.optional(v.string()),
+        link: v.optional(v.string()),
+        status: v.union(v.literal("pending"), v.literal("published"), v.literal("failed")),
+        itemId: v.optional(v.string()),
+        itemSlug: v.optional(v.string()),
+        error: v.optional(v.string()),
+        publishedAt: v.optional(v.number()),
+      }),
+    ),
     // Dev-only rows from `npm run seed`: never enqueued on the publish pool.
     demo: v.optional(v.boolean()),
   })
     .index("by_profileId_and_status", ["profileId", "status"])
     .index("by_profileId_and_scheduledAt", ["profileId", "scheduledAt"])
     .index("by_status", ["status"]),
+
+  // Singleton: which Webflow site/collection social posts are mirrored into, and
+  // how our four inputs map onto that collection's field slugs.
+  webflowConfig: defineTable({
+    siteId: v.string(),
+    siteName: v.string(),
+    collectionId: v.string(),
+    collectionName: v.string(),
+    // Derived from the chosen Reference field's validations.collectionId.
+    blogCollectionId: v.string(),
+    blogCollectionName: v.string(),
+    fields: v.object({
+      name: v.string(),
+      postCopy: v.string(),
+      blogRef: v.string(),
+      link: v.string(),
+    }),
+    // Mirrors the collection's own schema: some sites mark Post Copy required,
+    // and Webflow rejects an empty string for a required field.
+    postCopyRequired: v.boolean(),
+    blogSyncedAt: v.optional(v.number()),
+    // Newest `lastUpdated` seen; the watermark that keeps the daily sync to one request.
+    blogSyncCursor: v.optional(v.string()),
+    blogSyncError: v.optional(v.string()),
+    updatedAt: v.number(),
+  }),
+
+  // Local mirror of the blog collection, topped up daily. The composer's picker
+  // reads only from here, so composing a post never spends Webflow API budget.
+  // Rows are upserted and never expired: an item deleted in Webflow simply lingers.
+  webflowBlogPosts: defineTable({
+    collectionId: v.string(),
+    itemId: v.string(),
+    name: v.string(),
+    slug: v.string(),
+    lastUpdated: v.string(),
+  })
+    .index("by_collectionId", ["collectionId"])
+    .index("by_collectionId_and_itemId", ["collectionId", "itemId"]),
 
   // Raw, signature-verified Meta webhook deliveries (processed by the inbox later).
   webhookEvents: defineTable({

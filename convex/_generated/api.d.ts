@@ -15,11 +15,14 @@ import type * as lib_session from "../lib/session.js";
 import type * as media from "../media.js";
 import type * as meta_client from "../meta/client.js";
 import type * as meta_oauth from "../meta/oauth.js";
+import type * as meta_systemUser from "../meta/systemUser.js";
 import type * as posts from "../posts.js";
 import type * as profiles from "../profiles.js";
 import type * as publish from "../publish.js";
 import type * as seed from "../seed.js";
 import type * as system from "../system.js";
+import type * as webflow from "../webflow.js";
+import type * as webflow_client from "../webflow/client.js";
 import type * as webhooks from "../webhooks.js";
 
 import type {
@@ -36,11 +39,14 @@ declare const fullApi: ApiFromModules<{
   media: typeof media;
   "meta/client": typeof meta_client;
   "meta/oauth": typeof meta_oauth;
+  "meta/systemUser": typeof meta_systemUser;
   posts: typeof posts;
   profiles: typeof profiles;
   publish: typeof publish;
   seed: typeof seed;
   system: typeof system;
+  webflow: typeof webflow;
+  "webflow/client": typeof webflow_client;
   webhooks: typeof webhooks;
 }>;
 

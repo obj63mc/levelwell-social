@@ -62,6 +62,7 @@ export default function Queue({ sessionToken, profileId }: { sessionToken: strin
 function Row({ post, sessionToken }: { post: Post; sessionToken: string }) {
   const cancel = useMutation(api.posts.cancel);
   const retry = useMutation(api.posts.retry);
+  const retryWebflow = useMutation(api.posts.retryWebflow);
   const reschedule = useMutation(api.posts.reschedule);
   const [editing, setEditing] = useState(false);
   const [when, setWhen] = useState(() => toLocalInputValue(post.scheduledAt));
@@ -98,6 +99,11 @@ function Row({ post, sessionToken }: { post: Post; sessionToken: string }) {
               <InstagramIcon /> {post.instagram?.status ?? "pending"}
             </Badge>
           )}
+          {post.webflow && (
+            <Badge variant="outline" title={post.webflow.error}>
+              Webflow {post.webflow.status}
+            </Badge>
+          )}
           <span className="text-muted-foreground text-xs">
             {new Date(post.scheduledAt).toLocaleString(undefined, { dateStyle: "medium", timeStyle: "short" })}
           </span>
@@ -109,6 +115,18 @@ function Row({ post, sessionToken }: { post: Post; sessionToken: string }) {
             {message}
           </p>
         ))}
+        {post.webflow?.status === "failed" && (
+          <p className="text-muted-foreground text-xs">
+            The post is live; only the Webflow item failed. {post.webflow.error}{" "}
+            <button
+              type="button"
+              className="underline underline-offset-2"
+              onClick={() => void act(() => retryWebflow({ sessionToken, postId: post._id }))}
+            >
+              Retry Webflow
+            </button>
+          </p>
+        )}
         {editing && (
           <div className="flex items-center gap-2 pt-1">
             <Input type="datetime-local" className="w-auto" value={when} onChange={(e) => setWhen(e.target.value)} />

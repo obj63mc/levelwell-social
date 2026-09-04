@@ -5,6 +5,8 @@ import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/s
 import { publishPool } from "./lib/pool";
 import { absolutePermalink } from "./publish";
 import { requirePageAccess, requireSession, sessionArgs, type Session } from "./lib/session";
+import { loadConfig, validateWebflowInput, webflowInput } from "./webflow";
+import { webflowEnabled } from "./webflow/client";
 
 export const IG_CAPTION_MAX = 2200;
 export const IG_HASHTAG_MAX = 30;
@@ -27,6 +29,19 @@ const channelResult = v.object({
   error: v.optional(v.string()),
   commentError: v.optional(v.string()),
   permalink: v.optional(v.string()),
+  publishedAt: v.optional(v.number()),
+});
+
+const webflowResult = v.object({
+  name: v.string(),
+  postCopy: v.optional(v.string()),
+  blogItemId: v.optional(v.string()),
+  blogItemName: v.optional(v.string()),
+  link: v.optional(v.string()),
+  status: v.union(v.literal("pending"), v.literal("published"), v.literal("failed")),
+  itemId: v.optional(v.string()),
+  itemSlug: v.optional(v.string()),
+  error: v.optional(v.string()),
   publishedAt: v.optional(v.number()),
 });
 
@@ -54,6 +69,7 @@ export const postSummary = v.object({
   ),
   facebook: v.optional(channelResult),
   instagram: v.optional(channelResult),
+  webflow: v.optional(webflowResult),
   lastError: v.optional(v.string()),
   demo: v.optional(v.boolean()),
   media: v.array(v.object({ _id: v.id("media"), kind: v.union(v.literal("image"), v.literal("video")), url: v.union(v.string(), v.null()) })),
@@ -95,6 +111,7 @@ async function toSummary(ctx: QueryCtx | MutationCtx, post: Doc<"posts">) {
     status: post.status,
     facebook: channel(post.facebook, "facebook"),
     instagram: channel(post.instagram, "instagram"),
+    webflow: post.webflow,
     lastError: post.lastError,
     demo: post.demo,
     media,
@@ -147,6 +164,7 @@ export const create = mutation({
     ig: v.optional(igOptions),
     fbAsReel: v.optional(v.boolean()),
     scheduledAt: v.optional(v.number()),
+    webflow: v.optional(webflowInput),
   },
   returns: v.id("posts"),
   handler: async (ctx, args) => {
@@ -160,6 +178,12 @@ export const create = mutation({
     if (args.mediaIds.length > CAROUSEL_MAX) throw new ConvexError(`At most ${CAROUSEL_MAX} items per post.`);
     if (args.scheduledAt !== undefined && args.scheduledAt < now + MIN_LEAD_MS) {
       throw new ConvexError("Schedule at least a minute from now, or post now.");
+    }
+    if (args.webflow) {
+      if (!webflowEnabled()) throw new ConvexError("Webflow is not configured on this deployment.");
+      const webflowConfig = await loadConfig(ctx);
+      if (!webflowConfig) throw new ConvexError("Finish setting up Webflow before using it.");
+      validateWebflowInput(args.webflow, webflowConfig.postCopyRequired);
     }
     const caption = args.caption.trim();
     const fbCaption = args.fbCaption?.trim();
@@ -226,6 +250,16 @@ export const create = mutation({
       status: "scheduled",
       facebook: args.targets.facebook ? { status: "pending" } : undefined,
       instagram: args.targets.instagram ? { status: "pending" } : undefined,
+      webflow: args.webflow
+        ? {
+            name: args.webflow.name.trim(),
+            postCopy: args.webflow.postCopy?.trim() || undefined,
+            blogItemId: args.webflow.blogItemId,
+            blogItemName: args.webflow.blogItemName,
+            link: args.webflow.link?.trim() || undefined,
+            status: "pending" as const,
+          }
+        : undefined,
     });
     const post = await ctx.db.get("posts", postId);
     await enqueue(ctx, post!, runAt);
@@ -260,6 +294,25 @@ export const reschedule = mutation({
     if (args.scheduledAt < Date.now() + MIN_LEAD_MS) throw new ConvexError("Schedule at least a minute from now.");
     if (post.workId) await publishPool.cancel(ctx, post.workId as Parameters<typeof publishPool.cancel>[1]);
     await enqueue(ctx, post, args.scheduledAt);
+    return null;
+  },
+});
+
+/**
+ * Re-runs only the Webflow CMS write. Deliberately not on the publish pool: a
+ * retried CMS write must never be able to re-trigger a social publish.
+ */
+export const retryWebflow = mutation({
+  args: { ...sessionArgs, postId: v.id("posts") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.sessionToken);
+    const post = await loadPost(ctx, session, args.postId);
+    if (!post.webflow) throw new ConvexError("This post has nothing to send to Webflow.");
+    if (post.webflow.itemId) throw new ConvexError("This post is already in Webflow.");
+    if (post.demo) return null;
+    await ctx.db.patch("posts", post._id, { webflow: { ...post.webflow, status: "pending", error: undefined } });
+    await ctx.scheduler.runAfter(0, internal.publish.webflowOnly, { postId: post._id });
     return null;
   },
 });

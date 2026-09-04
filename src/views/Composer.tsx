@@ -1,5 +1,5 @@
 import { useMemo, useRef, useState } from "react";
-import { useConvex, useMutation } from "convex/react";
+import { useConvex, useMutation, useQuery } from "convex/react";
 import { AlertCircle, ArrowDown, ArrowUp, CalendarClock, ImagePlus, Info, Send, X } from "lucide-react";
 import { FacebookIcon, InstagramIcon } from "@/components/icons";
 import { api } from "../../convex/_generated/api";
@@ -15,6 +15,8 @@ import { Separator } from "@/components/ui/separator";
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import WebflowSection from "@/components/WebflowSection";
+import { emptyWebflowDraft, webflowArg, webflowProblems, type WebflowDraft } from "@/lib/webflow";
 import type { ProfileSummary } from "@/views/Dashboard";
 
 export type Channel = "facebook" | "instagram";
@@ -33,6 +35,7 @@ const CHANNEL_LABEL: Record<Channel, string> = { facebook: "Facebook", instagram
 
 export default function Composer({ sessionToken, profiles, initialChannel, onDone, onCancel }: Props) {
   const convex = useConvex();
+  const webflowStatus = useQuery(api.webflow.status, { sessionToken });
   const createPost = useMutation(api.posts.create);
   const removeMedia = useMutation(api.media.remove);
   const fileInput = useRef<HTMLInputElement>(null);
@@ -65,6 +68,7 @@ export default function Composer({ sessionToken, profiles, initialChannel, onDon
   const [fbAsReel, setFbAsReel] = useState(false);
   const [mode, setMode] = useState<"now" | "schedule">("now");
   const [when, setWhen] = useState(() => toLocalInputValue(Date.now() + 60 * 60_000));
+  const [webflow, setWebflow] = useState<WebflowDraft>(emptyWebflowDraft);
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Captured once per mount: "now" for validation/min-date without impure reads during render.
@@ -98,8 +102,9 @@ export default function Composer({ sessionToken, profiles, initialChannel, onDon
       if (igComment.length > IG_CAPTION_MAX) list.push(`Instagram comments are limited to ${IG_CAPTION_MAX} characters.`);
     }
     if (mode === "schedule" && fromLocalInputValue(when) < openedAt + 60_000) list.push("Schedule at least a minute from now.");
+    list.push(...webflowProblems(webflow, webflowStatus?.config?.postCopyRequired));
     return list;
-  }, [facebook, instagram, media, fbMixed, igText, igComment, hashtags, mentions, collaborators, mode, when, openedAt]);
+  }, [facebook, instagram, media, fbMixed, igText, igComment, hashtags, mentions, collaborators, mode, when, openedAt, webflow, webflowStatus]);
 
   async function addFiles(files: FileList | null) {
     if (!files?.length) return;
@@ -156,6 +161,7 @@ export default function Composer({ sessionToken, profiles, initialChannel, onDon
         },
         fbAsReel: singleVideo ? fbAsReel : undefined,
         scheduledAt: mode === "schedule" ? fromLocalInputValue(when) : undefined,
+        webflow: webflowArg(webflow),
       });
       onDone();
     } catch (e) {
@@ -428,6 +434,8 @@ export default function Composer({ sessionToken, profiles, initialChannel, onDon
             <p className="text-muted-foreground text-xs">Publish the same media to {channelName(secondary)} — it starts with a copy of the caption above, then you can edit it.</p>
           )}
         </div>
+
+        <WebflowSection sessionToken={sessionToken} draft={webflow} onChange={setWebflow} />
 
         {(error || problems.length > 0) && (
           <Alert variant={error ? "destructive" : "default"}>

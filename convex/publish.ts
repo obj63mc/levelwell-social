@@ -6,6 +6,7 @@ import { internalAction, internalMutation, internalQuery } from "./_generated/se
 import { pageTokenFor } from "./lib/session";
 import { isFullyPublished } from "./media";
 import { describeError, GraphApiError, graphGet, graphPost, graphVersion } from "./meta/client";
+import { describeWebflowError, webflowEnabled } from "./webflow/client";
 
 // ---------- state transitions (mutations) ----------
 
@@ -60,7 +61,7 @@ export const begin = internalMutation({
 export const recordChannel = internalMutation({
   args: {
     postId: v.id("posts"),
-    channel,
+    channel: v.union(channel, v.literal("webflow")),
     patch: v.object({
       status: v.optional(v.union(v.literal("pending"), v.literal("published"), v.literal("failed"))),
       postId: v.optional(v.string()),
@@ -74,6 +75,8 @@ export const recordChannel = internalMutation({
       commentError: v.optional(v.string()),
       error: v.optional(v.string()),
       publishedAt: v.optional(v.number()),
+      itemId: v.optional(v.string()),
+      itemSlug: v.optional(v.string()),
     }),
   },
   returns: v.null(),
@@ -220,7 +223,47 @@ async function recordPermalink(
   }
 }
 
-type ActionCtxLike = { runMutation: (ref: any, args: any) => Promise<any>; runQuery: (ref: any, args: any) => Promise<any> };
+type ActionCtxLike = {
+  runMutation: (ref: any, args: any) => Promise<any>;
+  runQuery: (ref: any, args: any) => Promise<any>;
+  runAction: (ref: any, args: any) => Promise<any>;
+};
+
+/**
+ * Mirrors the post into the Webflow CMS. Deliberately shaped like
+ * `postFirstComment`: it swallows every error into `webflow.error` so a CMS
+ * hiccup can never make a genuinely live social post look failed.
+ */
+export async function publishWebflow(ctx: ActionCtxLike, postId: Id<"posts">) {
+  if (!webflowEnabled()) return;
+  const fresh = (await ctx.runQuery(internal.publish.getPost, { postId })) as Doc<"posts"> | null;
+  const wf = fresh?.webflow;
+  if (!wf) return;
+  if (wf.itemId) return; // already created on an earlier attempt
+  const record = (patch: Record<string, unknown>) =>
+    ctx.runMutation(internal.publish.recordChannel, { postId, channel: "webflow", patch });
+  try {
+    const created = (await ctx.runAction(internal.webflow.createItemForPost, {
+      name: wf.name,
+      postCopy: wf.postCopy,
+      blogItemId: wf.blogItemId,
+      link: wf.link,
+    })) as { itemId: string; itemSlug: string };
+    await record({ status: "published", itemId: created.itemId, itemSlug: created.itemSlug, publishedAt: Date.now(), error: undefined });
+  } catch (error) {
+    await record({ status: "failed", error: describeWebflowError(error) });
+  }
+}
+
+/** "Retry Webflow" from the Queue: re-runs only the CMS write, never the social publish. */
+export const webflowOnly = internalAction({
+  args: { postId: v.id("posts") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await publishWebflow(ctx, args.postId);
+    return null;
+  },
+});
 
 export const run = internalAction({
   args: { postId: v.id("posts") },
@@ -254,6 +297,15 @@ export const run = internalAction({
 
     await runChannel("facebook", () => publishFacebook(ctx, input));
     await runChannel("instagram", () => publishInstagram(ctx, input));
+
+    // Only mirror into Webflow once something actually went live socially, and
+    // never let it contribute to `failures` — the social post is authoritative.
+    if (post.webflow) {
+      const settled = (await ctx.runQuery(internal.publish.getPost, { postId: post._id })) as Doc<"posts">;
+      if (settled.facebook?.status === "published" || settled.instagram?.status === "published") {
+        await publishWebflow(ctx, post._id);
+      }
+    }
 
     if (failures.length > 0) throw new Error(failures.join(" · "));
     return null;

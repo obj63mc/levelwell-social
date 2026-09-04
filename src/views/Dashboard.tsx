@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { useMutation } from "convex/react";
-import { Server, TriangleAlert, Unplug } from "lucide-react";
+import { useMutation, useQuery } from "convex/react";
+import { Server, Settings2, TriangleAlert, Unplug } from "lucide-react";
 import type { FunctionReturnType } from "convex/server";
 import { FacebookIcon, InstagramIcon } from "@/components/icons";
 import { api } from "../../convex/_generated/api";
 import { clearDeployment, useDeployment } from "@/lib/deployment";
 import { clearSessionToken } from "@/lib/session";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,6 +22,7 @@ import {
 import Calendar from "@/views/Calendar";
 import Composer, { type Channel } from "@/views/Composer";
 import Queue from "@/views/Queue";
+import Settings from "@/views/Settings";
 
 export type ConnectionStatus = FunctionReturnType<typeof api.profiles.connectionStatus>;
 export type ProfileSummary = ConnectionStatus["profiles"][number];
@@ -29,8 +31,13 @@ export default function Dashboard({ status, sessionToken }: { status: Connection
   const disconnect = useMutation(api.meta.oauth.disconnect);
   const deployment = useDeployment();
   const connection = status.connection!;
-  const primary = status.profiles[0];
+  // Only an active membership may be queried — requirePageAccess refuses the
+  // rest — so the landing view must never land on a needs_reconnect Page.
+  const primary = status.profiles.find((p) => p.status === "active") ?? status.profiles[0];
+  const usable = primary?.status === "active" ? primary : undefined;
   const [composing, setComposing] = useState<Channel | null>(null);
+  const [view, setView] = useState<"home" | "settings">("home");
+  const webflow = useQuery(api.webflow.status, { sessionToken });
 
   async function end() {
     try {
@@ -83,6 +90,11 @@ export default function Dashboard({ status, sessionToken }: { status: Connection
                         <TriangleAlert /> Needs reconnect
                       </Badge>
                     )}
+                    {p.missingTasks.length > 0 && (
+                      <Badge variant="destructive" title={`Meta granted only partial access to this Page. Missing: ${p.missingTasks.join(", ")}. You need full control of the Page (Page Settings → Page access).`}>
+                        <TriangleAlert /> Partial access
+                      </Badge>
+                    )}
                     {!p.webhookSubscribed && <Badge variant="outline">Webhook not subscribed</Badge>}
                   </div>
                 </div>
@@ -97,6 +109,11 @@ export default function Dashboard({ status, sessionToken }: { status: Connection
                 </DropdownMenuLabel>
               )}
             </DropdownMenuGroup>
+            {webflow?.enabled && (
+              <DropdownMenuItem onClick={() => { setComposing(null); setView("settings"); }}>
+                <Settings2 /> Webflow settings…
+              </DropdownMenuItem>
+            )}
             <DropdownMenuItem onClick={changeDeployment}>
               <Server /> Change Convex deployment…
             </DropdownMenuItem>
@@ -107,10 +124,14 @@ export default function Dashboard({ status, sessionToken }: { status: Connection
         </DropdownMenu>
       </header>
 
-      {composing ? (
+      {view === "settings" ? (
+        <Settings sessionToken={sessionToken} onBack={() => setView("home")} />
+      ) : composing ? (
         <Composer
           sessionToken={sessionToken}
-          profiles={status.profiles}
+          // Only Pages the caller may actually act on: the composer defaults to
+          // the first entry, and posting to a stale membership is refused.
+          profiles={status.profiles.filter((p) => p.status === "active")}
           initialChannel={composing}
           onDone={() => setComposing(null)}
           onCancel={() => setComposing(null)}
@@ -118,24 +139,34 @@ export default function Dashboard({ status, sessionToken }: { status: Connection
       ) : (
         <>
           <section aria-label="Quick post" className="grid gap-4 sm:grid-cols-2">
-            <Button size="lg" className="h-16 text-base" onClick={() => setComposing("facebook")} disabled={!primary}>
+            <Button size="lg" className="h-16 text-base" onClick={() => setComposing("facebook")} disabled={!usable}>
               <FacebookIcon className="size-5" /> Post to Facebook
             </Button>
             <Button
               size="lg"
               className="bg-teal text-teal-foreground hover:bg-teal/90 h-16 text-base"
               onClick={() => setComposing("instagram")}
-              disabled={!primary?.igUsername}
+              disabled={!usable?.igUsername}
             >
               <InstagramIcon className="size-5" /> Post to Instagram
             </Button>
           </section>
 
-          {primary && (
+          {usable ? (
             <>
-              <Calendar sessionToken={sessionToken} profileId={primary._id} />
-              <Queue sessionToken={sessionToken} profileId={primary._id} />
+              <Calendar sessionToken={sessionToken} profileId={usable._id} />
+              <Queue sessionToken={sessionToken} profileId={usable._id} />
             </>
+          ) : (
+            <Alert>
+              <TriangleAlert />
+              <AlertTitle>No Page is connected</AlertTitle>
+              <AlertDescription>
+                {status.profiles.length === 0
+                  ? "No Pages are assigned to this account yet."
+                  : "The Pages on this account all need reconnecting. Open the avatar menu to reconnect."}
+              </AlertDescription>
+            </Alert>
           )}
         </>
       )}

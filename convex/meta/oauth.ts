@@ -1,10 +1,18 @@
-import { v } from "convex/values";
+import { ConvexError, v } from "convex/values";
 import { internal } from "../_generated/api";
 import { internalAction, internalMutation, internalQuery, mutation, query } from "../_generated/server";
 import type { Id } from "../_generated/dataModel";
 import { env } from "../_generated/server";
 import { hashToken, randomHex, requireSession, sessionArgs } from "../lib/session";
 import { describeError, graphGet, graphGetAll, graphPost, graphVersion } from "./client";
+import {
+  IDENTITY_SCOPES,
+  resolveBusinessId,
+  systemUserMode,
+  systemUserPages,
+  userIsBusinessMember,
+  type SystemAccount,
+} from "./systemUser";
 
 const STATE_TTL_MS = 15 * 60 * 1000;
 
@@ -25,7 +33,15 @@ export const start = mutation({
     });
     const url = new URL(`https://www.facebook.com/${graphVersion()}/dialog/oauth`);
     url.searchParams.set("client_id", env.META_APP_ID);
-    url.searchParams.set("config_id", env.META_LOGIN_CONFIG_ID);
+    if (systemUserMode()) {
+      // Identity only. Asking for no business assets means Meta never shows the
+      // portfolio picker that refuses to share the app owner's own Page.
+      url.searchParams.set("scope", IDENTITY_SCOPES.join(","));
+    } else if (env.META_LOGIN_CONFIG_ID) {
+      url.searchParams.set("config_id", env.META_LOGIN_CONFIG_ID);
+    } else {
+      throw new ConvexError("Set META_SYSTEM_USER_TOKEN or META_LOGIN_CONFIG_ID on this deployment.");
+    }
     url.searchParams.set("redirect_uri", redirectUri());
     url.searchParams.set("response_type", "code");
     url.searchParams.set("state", state);
@@ -161,10 +177,12 @@ export const saveConnection = internalMutation({
     userTokenExpiresAt: v.number(),
     grantedScopes: v.array(v.string()),
     pages: v.array(pageInput),
+    // True when the page tokens come from the portfolio's system user.
+    systemUser: v.optional(v.boolean()),
   },
   returns: v.id("connections"),
   handler: async (ctx, args) => {
-    const { pages, ...connectionFields } = args;
+    const { pages, systemUser, ...connectionFields } = args;
     const existing = await ctx.db
       .query("connections")
       .withIndex("by_metaUserId", (q) => q.eq("metaUserId", args.metaUserId))
@@ -179,7 +197,9 @@ export const saveConnection = internalMutation({
 
     const granted = new Set<Id<"profiles">>();
     for (const page of pages) {
-      const { pageAccessToken, tasks, lastError, ...pageFields } = page;
+      const { pageAccessToken, tasks, lastError, ...rest } = page;
+      // The shared system token lives on the Page; per-manager tokens do not.
+      const pageFields = { ...rest, pageAccessToken: systemUser ? pageAccessToken : undefined };
       const current = await ctx.db
         .query("profiles")
         .withIndex("by_pageId", (q) => q.eq("pageId", page.pageId))
@@ -264,18 +284,36 @@ export const completeConnect = internalAction({
       const permissions = await graphGetAll<Permission>("me/permissions", {}, userToken);
       const grantedScopes = permissions.filter((p) => p.status === "granted").map((p) => p.permission);
 
-      // 4. Pages (with never-expiring Page tokens) + linked Instagram accounts
-      const accounts = await graphGetAll<Account>(
-        "me/accounts",
-        {
-          fields:
-            "id,name,category,access_token,tasks,picture{url},instagram_business_account{id,username,profile_picture_url}",
-          limit: 100,
-        },
-        userToken,
-      );
-      if (accounts.length === 0) {
-        throw new Error("No Facebook Pages were granted. Pick at least one Page you admin during login.");
+      // 4. Pages (with never-expiring Page tokens) + linked Instagram accounts.
+      //
+      // System-user mode inverts where these come from: the Pages belong to the
+      // portfolio's system user, not to whoever just logged in, so the login only
+      // has to prove the person is allowed in.
+      let accounts: (Account | SystemAccount)[];
+      if (systemUserMode()) {
+        const businessId = await resolveBusinessId();
+        const membership = await userIsBusinessMember(userToken, businessId);
+        if (!membership.ok) throw new Error(membership.reason);
+        if (!membership.member) {
+          throw new Error("You are not a member of this business portfolio. Ask an admin to add you in Meta Business settings.");
+        }
+        accounts = await systemUserPages();
+        if (accounts.length === 0) {
+          throw new Error("No Pages are assigned to the system user. Add the Page to it in Business settings → Users → System users → Add assets.");
+        }
+      } else {
+        accounts = await graphGetAll<Account>(
+          "me/accounts",
+          {
+            fields:
+              "id,name,category,access_token,tasks,picture{url},instagram_business_account{id,username,profile_picture_url}",
+            limit: 100,
+          },
+          userToken,
+        );
+        if (accounts.length === 0) {
+          throw new Error("No Facebook Pages were granted. Pick at least one Page you admin during login.");
+        }
       }
 
       // 5. Subscribe each Page to webhooks (feed → comments on Page posts)
@@ -311,6 +349,7 @@ export const completeConnect = internalAction({
         userTokenExpiresAt,
         grantedScopes,
         pages,
+        systemUser: systemUserMode(),
       });
       await ctx.runMutation(internal.meta.oauth.finishState, { state: args.state, status: "completed", connectionId });
     } catch (error) {

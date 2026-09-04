@@ -15,6 +15,9 @@ export const profileSummary = v.object({
   webhookSubscribed: v.boolean(),
   status: v.union(v.literal("active"), v.literal("needs_reconnect")),
   lastError: v.optional(v.string()),
+  // Page tasks Meta actually granted this manager. Missing ones mean publishing
+  // will fail later, so the Dashboard can warn before a post is ever composed.
+  missingTasks: v.array(v.string()),
 });
 
 export function toSummary({ profile: p, member }: PageAccess) {
@@ -30,7 +33,15 @@ export function toSummary({ profile: p, member }: PageAccess) {
     webhookSubscribed: p.webhookSubscribed,
     status: member.status,
     lastError: member.lastError,
+    missingTasks: missingTasks(member.tasks),
   };
+}
+
+/** Publishing needs both: CREATE_CONTENT to post, MANAGE for webhooks/metadata. */
+export const REQUIRED_TASKS = ["CREATE_CONTENT", "MANAGE"];
+
+export function missingTasks(tasks: string[]): string[] {
+  return REQUIRED_TASKS.filter((t) => !tasks.includes(t));
 }
 
 /** Drives the first-launch gate: no (valid) session → Connect screen. */

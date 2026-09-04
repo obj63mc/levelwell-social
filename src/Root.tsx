@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { ConvexProvider, ConvexReactClient } from "convex/react";
 import App from "@/App";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import { useDeployment, type Deployment } from "@/lib/deployment";
 import { SiteUrlContext } from "@/lib/site-url";
 import SetupDeployment from "@/views/SetupDeployment";
@@ -11,7 +12,9 @@ function ConfiguredApp({ deployment }: { deployment: Deployment }) {
   return (
     <ConvexProvider client={convex}>
       <SiteUrlContext value={deployment.siteUrl}>
-        <App />
+        <ErrorBoundary>
+          <App />
+        </ErrorBoundary>
       </SiteUrlContext>
     </ConvexProvider>
   );
