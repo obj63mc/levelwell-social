@@ -185,6 +185,30 @@ describe("posts.create", () => {
     expect(await t.run((ctx) => ctx.db.get("media", img))).toMatchObject({ status: "uploaded" });
     await expect(t.mutation(api.posts.retry, { sessionToken, postId })).rejects.toThrow(/Only failed/);
   });
+
+  test("remove deletes a failed post and its media; anything else is refused", async () => {
+    const t = setup();
+    const { sessionToken, profileId } = await login(t, "a", "p1");
+    const other = await login(t, "b", "p2");
+    const base = { sessionToken, profileId, caption: "", targets: { facebook: true, instagram: false }, scheduledAt: Date.now() + 3600_000 };
+
+    const img = await upload(t, sessionToken, profileId);
+    const failed = await t.mutation(api.posts.create, { ...base, mediaIds: [img] });
+    await expect(t.mutation(api.posts.remove, { sessionToken, postId: failed })).rejects.toThrow(/Only failed/);
+    await t.run((ctx) => ctx.db.patch("posts", failed, { status: "failed", lastError: "boom" }));
+    await expect(t.mutation(api.posts.remove, { sessionToken: other.sessionToken, postId: failed })).rejects.toThrow(/forbidden/);
+
+    await t.mutation(api.posts.remove, { sessionToken, postId: failed });
+    expect(await t.run((ctx) => ctx.db.get("posts", failed))).toBeNull();
+    expect(await t.run((ctx) => ctx.db.get("media", img))).toBeNull();
+    expect(await t.query(api.posts.listActive, { sessionToken, profileId })).toEqual([]);
+
+    const partialImg = await upload(t, sessionToken, profileId);
+    const partial = await t.mutation(api.posts.create, { ...base, mediaIds: [partialImg] });
+    await t.run((ctx) => ctx.db.patch("posts", partial, { status: "partially_failed" }));
+    await t.mutation(api.posts.remove, { sessionToken, postId: partial });
+    expect(await t.run((ctx) => ctx.db.get("posts", partial))).toBeNull();
+  });
 });
 
 describe("publish.run", () => {

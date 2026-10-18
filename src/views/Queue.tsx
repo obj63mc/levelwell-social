@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMutation, useQuery } from "convex/react";
-import { CalendarClock, ChevronDown, ChevronRight, RotateCcw, TriangleAlert, XCircle } from "lucide-react";
+import { CalendarClock, ChevronDown, ChevronRight, RotateCcw, Trash2, TriangleAlert, XCircle } from "lucide-react";
 import type { FunctionReturnType } from "convex/server";
 import { FacebookIcon, InstagramIcon } from "@/components/icons";
 import { api } from "../../convex/_generated/api";
@@ -64,7 +64,9 @@ function Row({ post, sessionToken }: { post: Post; sessionToken: string }) {
   const retry = useMutation(api.posts.retry);
   const retryWebflow = useMutation(api.posts.retryWebflow);
   const reschedule = useMutation(api.posts.reschedule);
+  const remove = useMutation(api.posts.remove);
   const [editing, setEditing] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [when, setWhen] = useState(() => toLocalInputValue(post.scheduledAt));
   const [error, setError] = useState<string | null>(null);
   const thumb = post.media[0];
@@ -138,6 +140,21 @@ function Row({ post, sessionToken }: { post: Post; sessionToken: string }) {
             </Button>
           </div>
         )}
+        {confirmingDelete && (
+          <div className="flex flex-wrap items-center gap-2 pt-1">
+            <p className="text-xs">
+              {post.status === "partially_failed"
+                ? "Delete this post from the app? The part that already went live stays on Facebook or Instagram."
+                : "Delete this post and its files from the app?"}
+            </p>
+            <Button size="sm" variant="destructive" onClick={() => void act(() => remove({ sessionToken, postId: post._id }))}>
+              Delete
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirmingDelete(false)}>
+              Keep
+            </Button>
+          </div>
+        )}
       </div>
       <div className="flex shrink-0 items-start gap-1">
         {post.status === "scheduled" && (
@@ -150,10 +167,15 @@ function Row({ post, sessionToken }: { post: Post; sessionToken: string }) {
             </Button>
           </>
         )}
-        {(post.status === "failed" || post.status === "partially_failed") && (
-          <Button size="sm" variant="ghost" onClick={() => void act(() => retry({ sessionToken, postId: post._id }))}>
-            <RotateCcw /> Retry
-          </Button>
+        {needsAttention(post) && (
+          <>
+            <Button size="sm" variant="ghost" onClick={() => void act(() => retry({ sessionToken, postId: post._id }))}>
+              <RotateCcw /> Retry
+            </Button>
+            <Button size="sm" variant="ghost" onClick={() => setConfirmingDelete((v) => !v)}>
+              <Trash2 /> Delete
+            </Button>
+          </>
         )}
       </div>
     </div>

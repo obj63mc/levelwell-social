@@ -3,6 +3,7 @@ import { internal } from "./_generated/api";
 import type { Doc, Id } from "./_generated/dataModel";
 import { mutation, query, type MutationCtx, type QueryCtx } from "./_generated/server";
 import { publishPool } from "./lib/pool";
+import { deletePostMedia } from "./media";
 import { absolutePermalink } from "./publish";
 import { requirePageAccess, requireSession, sessionArgs, type Session } from "./lib/session";
 import { loadConfig, validateWebflowInput, webflowInput } from "./webflow";
@@ -327,6 +328,23 @@ export const retry = mutation({
     if (post.status !== "failed" && post.status !== "partially_failed") throw new ConvexError("Only failed posts can be retried.");
     if (post.demo) throw new ConvexError("Demo posts can't be published.");
     await enqueue(ctx, post, Date.now());
+    return null;
+  },
+});
+
+/**
+ * Drops a failed post from the app for good, files included. Whatever already
+ * went live on Meta stays there; this never calls the Graph API.
+ */
+export const remove = mutation({
+  args: { ...sessionArgs, postId: v.id("posts") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const session = await requireSession(ctx, args.sessionToken);
+    const post = await loadPost(ctx, session, args.postId);
+    if (post.status !== "failed" && post.status !== "partially_failed") throw new ConvexError("Only failed posts can be deleted.");
+    await deletePostMedia(ctx, post);
+    await ctx.db.delete("posts", post._id);
     return null;
   },
 });

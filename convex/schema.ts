@@ -175,6 +175,16 @@ export default defineSchema({
     .index("by_profileId_and_scheduledAt", ["profileId", "scheduledAt"])
     .index("by_status", ["status"]),
 
+  // Free-text planning notes pinned to a calendar day, shared by the Page's managers.
+  notes: defineTable({
+    profileId: v.id("profiles"),
+    createdByConnectionId: v.id("connections"),
+    // A calendar day ("YYYY-MM-DD"), not an instant: a note must not slide to a
+    // neighbouring day for a manager in another timezone. Sorts lexically.
+    date: v.string(),
+    body: v.string(),
+  }).index("by_profileId_and_date", ["profileId", "date"]),
+
   // Singleton: which Webflow site/collection social posts are mirrored into, and
   // how our four inputs map onto that collection's field slugs.
   webflowConfig: defineTable({

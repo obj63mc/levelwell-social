@@ -90,8 +90,8 @@ export function isFullyPublished(post: Doc<"posts">): boolean {
   return true;
 }
 
-/** Deletes every asset a published post owns — bytes and row — and unlinks them. */
-async function purge(ctx: MutationCtx, post: Doc<"posts">) {
+/** Deletes every asset a post owns, bytes and row. The caller unlinks or deletes the post. */
+export async function deletePostMedia(ctx: MutationCtx, post: Doc<"posts">) {
   const ids = new Set<Id<"media">>(post.mediaIds);
   if (post.ig.coverMediaId) ids.add(post.ig.coverMediaId);
   for (const id of ids) {
@@ -101,6 +101,11 @@ async function purge(ctx: MutationCtx, post: Doc<"posts">) {
     if (media.status !== "deleted") await ctx.storage.delete(media.storageId);
     await ctx.db.delete("media", media._id);
   }
+}
+
+/** Deletes every asset a published post owns and unlinks them. */
+async function purge(ctx: MutationCtx, post: Doc<"posts">) {
+  await deletePostMedia(ctx, post);
   await ctx.db.patch("posts", post._id, { mediaIds: [], ig: { ...post.ig, coverMediaId: undefined } });
 }
 

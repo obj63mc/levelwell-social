@@ -16,6 +16,7 @@ import type * as media from "../media.js";
 import type * as meta_client from "../meta/client.js";
 import type * as meta_oauth from "../meta/oauth.js";
 import type * as meta_systemUser from "../meta/systemUser.js";
+import type * as notes from "../notes.js";
 import type * as posts from "../posts.js";
 import type * as profiles from "../profiles.js";
 import type * as publish from "../publish.js";
@@ -40,6 +41,7 @@ declare const fullApi: ApiFromModules<{
   "meta/client": typeof meta_client;
   "meta/oauth": typeof meta_oauth;
   "meta/systemUser": typeof meta_systemUser;
+  notes: typeof notes;
   posts: typeof posts;
   profiles: typeof profiles;
   publish: typeof publish;

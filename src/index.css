@@ -23,6 +23,7 @@
   --color-chart-1: var(--chart-1);
   --color-teal: var(--teal);
   --color-teal-foreground: var(--teal-foreground);
+  --color-note: var(--note);
   --color-ring: var(--ring);
   --color-input: var(--input);
   --color-border: var(--border);
@@ -68,6 +69,8 @@
   --accent-foreground: oklch(0.311 0.043 312.9);
   --teal: oklch(0.689 0.122 183.7);
   --teal-foreground: oklch(1 0 0);
+  /* Calendar notes: amber, apart from the post chips (orchid, teal, red). */
+  --note: oklch(0.8 0.15 80);
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.904 0 0);
   --input: oklch(0.904 0 0);
@@ -105,6 +108,7 @@
   --accent-foreground: oklch(0.985 0 0);
   --teal: oklch(0.72 0.122 183.7);
   --teal-foreground: oklch(0.145 0 0);
+  --note: oklch(0.82 0.15 80);
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
